@@ -1,3 +1,6 @@
+pragma ComponentBehavior: Bound
+
+import "home"
 import QtQuick
 import QtQuick.Layouts
 import Caelestia.Config
@@ -7,29 +10,60 @@ import qs.components.controls
 import qs.services
 
 // Dashboard "Home" tab: Home Assistant.
-// Step 1: setup form + connection status. Entity picker and controls come next.
+// Setup form -> tiles of the chosen devices -> editor (pencil button) to choose them.
 Item {
     id: root
 
+    property bool editing
+
     implicitWidth: 840
     implicitHeight: layout.implicitHeight + Tokens.padding.large * 2
+
+    Component.onCompleted: HomeAssistant.refresh()
 
     ColumnLayout {
         id: layout
 
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.top: parent.top
         anchors.margins: Tokens.padding.large
         spacing: Tokens.spacing.medium
 
-        StyledText {
-            text: Tr.tr("Home Assistant")
-            font: Tokens.font.body.builders.large.size(28).weight(Font.DemiBold).build()
-            color: Colours.palette.m3onSurface
+        // Header
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Tokens.spacing.small
+
+            StyledText {
+                Layout.fillWidth: true
+                text: Tr.tr("Home")
+                font: Tokens.font.body.builders.large.size(28).weight(Font.DemiBold).build()
+                color: Colours.palette.m3onSurface
+            }
+
+            IconButton {
+                visible: HomeAssistant.connected && root.editing
+                type: IconButton.Text
+                isRound: true
+                icon: "logout"
+                inactiveOnColour: Colours.palette.m3error
+                onClicked: {
+                    root.editing = false;
+                    HomeAssistant.forget();
+                }
+            }
+
+            IconButton {
+                visible: HomeAssistant.connected
+                type: root.editing ? IconButton.Filled : IconButton.Tonal
+                isRound: true
+                icon: root.editing ? "check" : "edit"
+                onClicked: root.editing = !root.editing
+            }
         }
 
-        // Setup form (shown until a working connection exists)
+        // Setup form (until a working connection exists)
         ColumnLayout {
             Layout.fillWidth: true
             visible: !HomeAssistant.connected
@@ -38,7 +72,7 @@ Item {
             StyledText {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                text: Tr.tr("Enter your Home Assistant address and a long-lived access token (Profile → Security in Home Assistant). They are stored in your system keyring, never in a config file.")
+                text: HomeAssistant.status === "loading" ? Tr.tr("Loading...") : Tr.tr("Enter your Home Assistant address and a long-lived access token (Profile → Security in Home Assistant). They are stored in your system keyring, never in a config file.")
                 font: Tokens.font.body.small
                 color: Colours.palette.m3onSurfaceVariant
             }
@@ -84,27 +118,59 @@ Item {
             }
         }
 
-        // Connected view (placeholder until the entity picker exists)
-        ColumnLayout {
+        // Tiles
+        Flow {
+            id: tiles
+
             Layout.fillWidth: true
-            visible: HomeAssistant.connected
+            visible: HomeAssistant.connected && !root.editing
             spacing: Tokens.spacing.small
 
-            StyledText {
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                text: Tr.tr("Connected to %1").arg(HomeAssistant.url)
-                font: Tokens.font.body.medium
-                color: Colours.palette.m3primary
+            Repeater {
+                model: HomeAssistant.selected
+
+                EntityTile {
+                    required property string modelData
+
+                    entityId: modelData
+                }
             }
 
-            TextButton {
-                Layout.alignment: Qt.AlignRight
-                horizontalPadding: Tokens.padding.extraLarge
-                type: TextButton.Tonal
-                text: Tr.tr("Disconnect")
-                onClicked: HomeAssistant.forget()
+            add: Transition {
+                Anim {
+                    property: "opacity"
+                    from: 0
+                    to: 1
+                }
+                Anim {
+                    property: "scale"
+                    from: 0.85
+                    to: 1
+                    type: Anim.FastSpatial
+                }
             }
+
+            move: Transition {
+                Anim {
+                    properties: "x,y"
+                    type: Anim.DefaultSpatial
+                }
+            }
+        }
+
+        StyledText {
+            Layout.fillWidth: true
+            visible: HomeAssistant.connected && !root.editing && HomeAssistant.selected.length === 0
+            wrapMode: Text.WordWrap
+            text: Tr.tr("No devices yet. Tap the pencil to choose which ones appear here.")
+            font: Tokens.font.body.small
+            color: Colours.palette.m3onSurfaceVariant
+        }
+
+        // Editor
+        EntityEditor {
+            Layout.fillWidth: true
+            visible: HomeAssistant.connected && root.editing
         }
     }
 }
