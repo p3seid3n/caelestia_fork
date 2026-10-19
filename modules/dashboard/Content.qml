@@ -41,6 +41,13 @@ Item {
                 iconName: "cloud",
                 text: Tr.tr("Weather"),
                 enabled: Config.dashboard.showWeather
+            },
+            {
+                component: homeComponent,
+                iconName: "home",
+                text: Tr.tr("Home"),
+                // Always on: the show* flags live in the C++ config plugin, which this fork leaves untouched.
+                enabled: true
             }
         ];
         return allTabs.filter(tab => tab.enabled);
@@ -180,6 +187,12 @@ Item {
                 id: weatherComponent
 
                 WeatherTab {}
+            }
+
+            Component {
+                id: homeComponent
+
+                HomeTab {}
             }
 
             Behavior on contentX {
