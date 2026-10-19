@@ -66,6 +66,12 @@ WlSessionLockSurface {
                 to: 0
                 type: Anim.StandardLarge
             }
+            Anim {
+                target: background
+                property: "scale"
+                to: 1.08
+                type: Anim.EmphasizedLarge
+            }
             SequentialAnimation {
                 PauseAnimation {
                     duration: Tokens.anim.durations.small
@@ -95,6 +101,12 @@ WlSessionLockSurface {
             property: "opacity"
             to: 1
             type: Anim.StandardLarge
+        }
+        Anim {
+            target: background
+            property: "scale"
+            to: 1
+            type: Anim.EmphasizedLarge
         }
         SequentialAnimation {
             ParallelAnimation {
@@ -160,6 +172,7 @@ WlSessionLockSurface {
 
         anchors.fill: parent
         opacity: 0
+        scale: 1.08 // KairosOS: settles to 1 on lock, zooms back out on unlock
 
         layer.enabled: true
         layer.effect: MultiEffect {
