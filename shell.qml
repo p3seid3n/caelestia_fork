@@ -26,6 +26,7 @@ ShellRoot {
 
     GSFLoader {}
     ServiceLoader {}
+    Handoff {} // KairosOS: first, so its black cover is on screen before anything else
 
     Background {}
     Drawers {}

@@ -1,0 +1,10 @@
+{
+    "user": "maelstadler",
+    "command": ["Hyprland"],
+    "hourColour": "#F7D51D",
+    "minuteColour": "#0046AF",
+    "accentColour": "#E60012",
+    "surfaceColour": "#201f23",
+    "onSurfaceColour": "#e5e1e7",
+    "errorColour": "#ffb4ab"
+}

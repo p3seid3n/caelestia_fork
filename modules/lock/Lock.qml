@@ -73,19 +73,6 @@ Scope {
         onPressed: lock.unlock()
     }
 
-    // KairosOS: lock screen as login screen.
-    // With greetd autologin, the session is started with KAIROS_LOCK_ON_START=1 and the
-    // shell locks itself once per login. A marker in $XDG_RUNTIME_DIR (cleared at logout/
-    // reboot) stops it from locking again when the shell is merely restarted.
-    Process {
-        running: Quickshell.env("KAIROS_LOCK_ON_START") === "1"
-        command: ["sh", "-c", "m=\"${XDG_RUNTIME_DIR:-/tmp}/kairos-startlock\"; [ -e \"$m\" ] && exit 1; touch \"$m\""]
-        onExited: code => {
-            if (code === 0)
-                lock.locked = true;
-        }
-    }
-
     IpcHandler {
         function lock(): void {
             lock.locked = true;

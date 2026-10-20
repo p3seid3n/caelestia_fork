@@ -1,0 +1,5 @@
+#!/bin/sh
+# Started by greetd (as the "greeter" user): a bare Hyprland that only shows the Kairos greeter.
+export XDG_SESSION_TYPE=wayland
+export QT_QPA_PLATFORM=wayland
+exec Hyprland --config /usr/share/kairos-greeter/hyprland.lua
