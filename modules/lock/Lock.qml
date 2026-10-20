@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.components.misc
+import qs.services
 
 Scope {
     property alias lock: lock
@@ -13,6 +14,22 @@ Scope {
         id: lock
 
         signal unlock
+
+        // KairosOS: "style" in ~/.config/caelestia/kairos-lock.json picks the lock screen.
+        surface: LockStyle.kairos ? kairosSurface : caelestiaSurface
+    }
+
+    Component {
+        id: kairosSurface
+
+        KairosSurface {
+            lock: lock
+            pam: pam
+        }
+    }
+
+    Component {
+        id: caelestiaSurface
 
         LockSurface {
             lock: lock
