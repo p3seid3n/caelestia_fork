@@ -27,8 +27,11 @@ Singleton {
     property list<var> entities: []
     // entity_id -> entity, rebuilt on every refresh.
     property var byId: ({})
-    // Entity ids the user chose to show, in display order.
-    property list<string> selected: []
+    // Tiles the user placed, in display order: [{ id, w, h }].
+    // w: 1-8 grid columns, h: 1-3 grid rows. The grid packs them densely.
+    readonly property int columns: 8
+    property var tiles: []
+    readonly property list<string> selected: tiles.map(t => t.id)
 
     // Doors, locks and alarms: hidden in the editor unless explicitly shown, and need a confirmation tap.
     readonly property list<string> sensitiveDomains: ["cover", "lock", "alarm_control_panel", "valve", "siren"]
@@ -51,7 +54,11 @@ Singleton {
 
     function isSensitive(entityId: string): bool {
         const e = byId[entityId];
-        return sensitiveDomains.includes(domainOf(entityId)) || e?.attributes?.device_class === "garage" || e?.attributes?.device_class === "door";
+        const dc = e?.attributes?.device_class ?? "";
+        // Blinds and shades are harmless; garage doors, doors and gates are not.
+        if (domainOf(entityId) === "cover")
+            return ["garage", "door", "gate"].includes(dc);
+        return sensitiveDomains.includes(domainOf(entityId)) || dc === "garage" || dc === "door";
     }
 
     function isActionable(entityId: string): bool {
@@ -69,11 +76,88 @@ Singleton {
     }
 
     function setSelected(entityId: string, on: bool): void {
-        const next = selected.filter(id => id !== entityId);
+        const next = tiles.filter(t => t.id !== entityId);
         if (on)
-            next.push(entityId);
-        selected = next;
+            next.push({
+                id: entityId,
+                w: 2,
+                h: 1
+            });
+        setTiles(next);
+    }
+
+    function setTiles(next: var): void {
+        tiles = next;
         settingsSaveTimer.restart();
+    }
+
+    function resizeTile(entityId: string, w: int, h: int): void {
+        setTiles(tiles.map(t => t.id === entityId ? {
+                id: t.id,
+                w: Math.max(1, Math.min(columns, w)),
+                h: Math.max(1, Math.min(3, h))
+            } : t));
+    }
+
+    function moveTile(from: int, to: int): void {
+        if (from === to || from < 0 || to < 0 || from >= tiles.length || to >= tiles.length)
+            return;
+        const next = tiles.slice();
+        const [t] = next.splice(from, 1);
+        next.splice(to, 0, t);
+        setTiles(next);
+    }
+
+    // What a device can do, from its attributes. Used to pick tile controls.
+    function features(entityId: string): var {
+        const e = byId[entityId];
+        const a = e?.attributes ?? {};
+        const d = domainOf(entityId);
+        const modes = a.supported_color_modes ?? [];
+        const colourModes = ["hs", "xy", "rgb", "rgbw", "rgbww"];
+        return {
+            brightness: d === "light" && modes.some(m => m !== "onoff"),
+            colour: d === "light" && modes.some(m => colourModes.includes(m)),
+            colourTemp: d === "light" && modes.includes("color_temp"),
+            position: d === "cover" && a.current_position !== undefined,
+            tilt: d === "cover" && a.current_tilt_position !== undefined,
+            climate: d === "climate",
+            media: d === "media_player",
+            volume: d === "media_player" && a.volume_level !== undefined,
+            fanSpeed: d === "fan" && a.percentage !== undefined,
+            value: d === "sensor" || d === "binary_sensor" || d === "person"
+        };
+    }
+
+    // Generic service call with an optional optimistic state/attribute patch.
+    function call(domain: string, service: string, data: var, patch: var): void {
+        if (patch && byId[data.entity_id]) {
+            const copy = Object.assign({}, byId[data.entity_id]);
+            if (patch.state !== undefined)
+                copy.state = patch.state;
+            copy.attributes = Object.assign({}, copy.attributes, patch.attributes ?? {});
+            const map = Object.assign({}, byId);
+            map[data.entity_id] = copy;
+            byId = map;
+        }
+        request("POST", url, token, `/api/services/${domain}/${service}`, data, () => refreshSoon.restart());
+    }
+
+    // For sliders: only the latest value is sent, at most every 250 ms.
+    property var pendingCall: null
+
+    function callThrottled(domain: string, service: string, data: var, patch: var): void {
+        if (!throttle.running) {
+            call(domain, service, data, patch);
+            throttle.start();
+        } else {
+            pendingCall = {
+                domain,
+                service,
+                data,
+                patch
+            };
+        }
     }
 
     // Perform the natural action for an entity (toggle, run, open/close, lock/unlock).
@@ -155,16 +239,20 @@ Singleton {
             if (code !== 200)
                 return;
             try {
-                const list = JSON.parse(body).map(e => ({
-                            entity_id: e.entity_id,
-                            state: e.state,
-                            attributes: {
-                                friendly_name: e.attributes?.friendly_name ?? e.entity_id,
-                                unit_of_measurement: e.attributes?.unit_of_measurement ?? "",
-                                device_class: e.attributes?.device_class ?? "",
-                                brightness: e.attributes?.brightness ?? null
-                            }
-                        }));
+                const list = JSON.parse(body).map(e => {
+                    const a = Object.assign({}, e.attributes ?? {});
+                    a.friendly_name = a.friendly_name ?? e.entity_id;
+                    a.unit_of_measurement = a.unit_of_measurement ?? "";
+                    a.device_class = a.device_class ?? "";
+                    a.brightness = a.brightness ?? null;
+                    delete a.entity_picture; // can carry access tokens, never needed here
+                    return {
+                        entity_id: e.entity_id,
+                        state: e.state,
+                        last_changed: e.last_changed,
+                        attributes: a
+                    };
+                });
                 list.sort((a, b) => a.attributes.friendly_name.localeCompare(b.attributes.friendly_name));
                 const map = {};
                 for (const e of list)
@@ -228,11 +316,26 @@ Singleton {
     }
 
     Timer {
+        id: throttle
+
+        interval: 250
+        onTriggered: {
+            // Send the latest value that arrived while waiting.
+            if (root.pendingCall) {
+                const c = root.pendingCall;
+                root.pendingCall = null;
+                root.call(c.domain, c.service, c.data, c.patch);
+                start();
+            }
+        }
+    }
+
+    Timer {
         id: settingsSaveTimer
 
         interval: 500
         onTriggered: settings.setText(JSON.stringify({
-                selected: root.selected
+                tiles: root.tiles
             }))
     }
 
@@ -243,7 +346,15 @@ Singleton {
         path: `${Paths.state}/homeassistant.json`
         onLoaded: {
             try {
-                root.selected = JSON.parse(text()).selected ?? [];
+                const c = JSON.parse(text());
+                if (c.tiles)
+                    root.tiles = c.tiles;
+                else if (c.selected) // older format: plain list of ids
+                    root.tiles = c.selected.map(id => ({
+                                id,
+                                w: 2,
+                                h: 1
+                            }));
             } catch (error) {
                 console.warn("HomeAssistant: could not parse settings:", error);
             }
@@ -251,7 +362,7 @@ Singleton {
         onLoadFailed: err => {
             if (err === FileViewError.FileNotFound)
                 Qt.callLater(() => setText(JSON.stringify({
-                        selected: []
+                        tiles: []
                     })));
         }
     }

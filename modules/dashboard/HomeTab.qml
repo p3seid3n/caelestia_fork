@@ -16,9 +16,19 @@ Item {
 
     required property ScreenState screenState
     property bool editing
+    property bool picking // device list open while editing
+
+    onEditingChanged: {
+        picking = false;
+        detail.open = false;
+    }
 
     implicitWidth: 840
-    implicitHeight: layout.implicitHeight + Tokens.padding.large * 2
+    implicitHeight: Math.max(layout.implicitHeight, detail.open ? tiles.y + 400 : 0) + Tokens.padding.large * 2
+
+    Behavior on implicitHeight {
+        Anim {}
+    }
 
     Component.onCompleted: HomeAssistant.refresh()
 
@@ -128,44 +138,14 @@ Item {
             }
         }
 
-        // Tiles
-        Flow {
+        // Tiles (also shown while editing: they wiggle and can be moved/resized)
+        TileGrid {
             id: tiles
 
             Layout.fillWidth: true
-            visible: HomeAssistant.connected && !root.editing
-            spacing: Tokens.spacing.small
-
-            Repeater {
-                model: HomeAssistant.selected
-
-                EntityTile {
-                    required property string modelData
-
-                    entityId: modelData
-                }
-            }
-
-            add: Transition {
-                Anim {
-                    property: "opacity"
-                    from: 0
-                    to: 1
-                }
-                Anim {
-                    property: "scale"
-                    from: 0.85
-                    to: 1
-                    type: Anim.FastSpatial
-                }
-            }
-
-            move: Transition {
-                Anim {
-                    properties: "x,y"
-                    type: Anim.DefaultSpatial
-                }
-            }
+            visible: HomeAssistant.connected
+            editing: root.editing
+            onExpand: (id, from) => detail.show(id, from)
         }
 
         StyledText {
@@ -177,10 +157,32 @@ Item {
             color: Colours.palette.m3onSurfaceVariant
         }
 
-        // Editor
+        // Edit mode: add / remove devices
+        TextButton {
+            Layout.alignment: Qt.AlignHCenter
+            visible: HomeAssistant.connected && root.editing
+            type: root.picking ? TextButton.Filled : TextButton.Tonal
+            horizontalPadding: Tokens.padding.extraLarge
+            text: root.picking ? Tr.tr("Done adding") : Tr.tr("Add devices")
+            onClicked: root.picking = !root.picking
+        }
+
         EntityEditor {
             Layout.fillWidth: true
-            visible: HomeAssistant.connected && root.editing
+            visible: HomeAssistant.connected && root.editing && root.picking
         }
+    }
+
+    // Full view of a tapped tile, over the grid.
+    EntityDetail {
+        id: detail
+
+        x: tiles.x + layout.x
+        y: tiles.y + layout.y
+        width: tiles.width
+        height: 400
+        z: 10
+
+        // `from` arrives in grid coordinates, which is what this item uses too.
     }
 }
