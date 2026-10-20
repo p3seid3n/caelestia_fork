@@ -192,7 +192,9 @@ Item {
             Component {
                 id: homeComponent
 
-                HomeTab {}
+                HomeTab {
+                    screenState: root.screenState
+                }
             }
 
             Behavior on contentX {

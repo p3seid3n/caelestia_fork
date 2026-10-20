@@ -14,12 +14,22 @@ import qs.services
 Item {
     id: root
 
+    required property ScreenState screenState
     property bool editing
 
     implicitWidth: 840
     implicitHeight: layout.implicitHeight + Tokens.padding.large * 2
 
     Component.onCompleted: HomeAssistant.refresh()
+
+    // Ask the drawer window for keyboard focus while there is something to type into.
+    // Released automatically when this tab is unloaded.
+    Binding {
+        target: root.screenState
+        property: "dashboardInput"
+        value: !HomeAssistant.connected || root.editing
+        restoreMode: Binding.RestoreValue
+    }
 
     ColumnLayout {
         id: layout
