@@ -258,7 +258,7 @@ Item {
             Text {
                 anchors.centerIn: parent
                 text: win.greeter.busy ? "Signing in…" : win.greeter.preview ? "Preview — any password" : "Enter your password"
-                color: Qt.alpha(win.greeter.onSurfaceColour, 0.5)
+                color: Qt.alpha(win.greeter.textColour, 0.5)
                 font.family: "Google Sans Flex"
                 font.pointSize: 12
                 opacity: win.greeter.buffer ? 0 : 1
@@ -283,7 +283,7 @@ Item {
                         width: 10
                         height: 10
                         radius: 5
-                        color: win.greeter.onSurfaceColour
+                        color: win.greeter.textColour
                         scale: 0
 
                         Component.onCompleted: scale = 1
@@ -304,7 +304,7 @@ Item {
                 elide: Text.ElideLeft
                 visible: win.greeter.showPassword
                 text: win.greeter.buffer
-                color: win.greeter.onSurfaceColour
+                color: win.greeter.textColour
                 font.family: "Google Sans Flex"
                 font.pointSize: 13
             }
@@ -315,7 +315,7 @@ Item {
                 anchors.rightMargin: 16
                 anchors.verticalCenter: parent.verticalCenter
                 text: win.greeter.showPassword ? "visibility_off" : "visibility"
-                color: win.greeter.onSurfaceColour
+                color: win.greeter.textColour
                 opacity: win.greeter.buffer ? 0.8 : 0.3
                 font.family: "Material Symbols Rounded"
                 font.pixelSize: 22

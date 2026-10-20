@@ -25,7 +25,7 @@ ShellRoot {
     property color minuteColour: "#c6c4dd"
     property color accentColour: "#c4c0ff"
     property color surfaceColour: "#201f23"
-    property color onSurfaceColour: "#e5e1e7"
+    property color textColour: "#e5e1e7"
     property color errorColour: "#ffb4ab"
 
     // State
@@ -95,7 +95,7 @@ ShellRoot {
                 shell.user = c.user ?? "";
                 if (c.command)
                     shell.command = c.command;
-                for (const key of ["hourColour", "minuteColour", "accentColour", "surfaceColour", "onSurfaceColour", "errorColour"])
+                for (const key of ["hourColour", "minuteColour", "accentColour", "surfaceColour", "textColour", "errorColour"])
                     if (c[key])
                         shell[key] = c[key];
             } catch (error) {
