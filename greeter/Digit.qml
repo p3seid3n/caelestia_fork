@@ -1,6 +1,7 @@
 import QtQuick
 
 // Greeter copy of modules/lock/kairos/RollingDigit.qml without Caelestia dependencies.
+// Same motion (Motion.qml mirrors Caelestia's Anim types).
 Item {
     id: root
 
@@ -30,17 +31,17 @@ Item {
         id: roll
 
         ParallelAnimation {
-            M3Anim {
+            Motion {
                 target: face
                 property: "y"
                 to: -root.implicitHeight * 0.35
-                duration: 250
+                type: "fastSpatial"
             }
-            M3Anim {
+            Motion {
                 target: face
                 property: "opacity"
                 to: 0
-                duration: 150
+                type: "fastEffects"
             }
         }
         PropertyAction {
@@ -54,15 +55,17 @@ Item {
             value: root.implicitHeight * 0.35
         }
         ParallelAnimation {
-            M3Anim {
+            Motion {
                 target: face
                 property: "y"
                 to: 0
+                type: "defaultSpatial"
             }
-            M3Anim {
+            Motion {
                 target: face
                 property: "opacity"
                 to: 1
+                type: "defaultEffects"
             }
         }
     }

@@ -18,8 +18,8 @@ Item {
     }
 
     Behavior on prog {
-        M3Anim {
-            duration: 600
+        Motion {
+            type: "emphasized"
         }
     }
 
@@ -41,17 +41,17 @@ Item {
         id: leaveAnim
 
         ParallelAnimation {
-            M3Anim {
+            Motion {
                 target: stage
                 property: "scale"
                 to: 1.12
-                duration: 600
+                type: "emphasized"
             }
-            M3Anim {
+            Motion {
                 target: stage
                 property: "opacity"
                 to: 0
-                duration: 400
+                type: "standard"
             }
         }
         PauseAnimation {
@@ -132,14 +132,14 @@ Item {
         }
 
         Behavior on opacity {
-            M3Anim {
-                duration: 700
+            Motion {
+                type: "standardLarge"
             }
         }
 
         Behavior on scale {
-            M3Anim {
-                duration: 900
+            Motion {
+                type: "emphasized"
             }
         }
 
@@ -265,49 +265,20 @@ Item {
                 opacity: win.greeter.buffer ? 0 : 1
 
                 Behavior on opacity {
-                    M3Anim {
-                        duration: 200
+                    Motion {
+                        type: "defaultEffects"
                     }
                 }
             }
 
-            // Dots / revealed text
-            Row {
-                anchors.centerIn: parent
-                spacing: 8
-                visible: !win.greeter.showPassword
-
-                Repeater {
-                    model: win.greeter.buffer.length
-
-                    Rectangle {
-                        width: 10
-                        height: 10
-                        radius: 5
-                        color: win.greeter.textColour
-                        scale: 0
-
-                        Component.onCompleted: scale = 1
-
-                        Behavior on scale {
-                            M3Anim {
-                                duration: 300
-                            }
-                        }
-                    }
-                }
-            }
-
-            Text {
-                anchors.centerIn: parent
-                width: parent.width - 120
-                horizontalAlignment: Text.AlignHCenter
-                elide: Text.ElideLeft
-                visible: win.greeter.showPassword
-                text: win.greeter.buffer
-                color: win.greeter.textColour
-                font.family: "Google Sans Flex"
-                font.pointSize: 13
+            // Typed characters: same shape-morph animation as the lock screen.
+            PasswordChars {
+                anchors.fill: parent
+                anchors.leftMargin: 56
+                anchors.rightMargin: 56
+                buffer: win.greeter.buffer
+                showPassword: win.greeter.showPassword
+                colour: win.greeter.textColour
             }
 
             // Show / hide password
@@ -363,11 +334,11 @@ Item {
             to: -8
             duration: 80
         }
-        M3Anim {
+        Motion {
             target: shakeOffset
             property: "x"
             to: 0
-            duration: 250
+            type: "fastSpatial"
         }
     }
 }
