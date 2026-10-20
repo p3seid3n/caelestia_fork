@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 
 // The greeter's content for one screen (clock, password bar, animations).
 // Lives in a layer-shell panel (preview inside Hyprland) or a plain window (cage kiosk).
