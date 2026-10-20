@@ -1,5 +1,8 @@
 #!/bin/sh
-# Started by greetd (as the "greeter" user): a bare Hyprland that only shows the Kairos greeter.
-export XDG_SESSION_TYPE=wayland
+# Started by greetd as the "greeter" user.
+# cage is a one-app ("kiosk") Wayland compositor: it shows the Kairos greeter full-screen
+# and exits as soon as the greeter does, so greetd can start the real session.
+export KAIROS_GREETER_KIOSK=1
 export QT_QPA_PLATFORM=wayland
-exec Hyprland --config /usr/share/kairos-greeter/hyprland.lua
+export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
+exec cage -s -- qs -p /usr/share/kairos-greeter

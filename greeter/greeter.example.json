@@ -1,6 +1,6 @@
 {
     "user": "maelstadler",
-    "command": ["Hyprland"],
+    "command": ["/usr/bin/start-hyprland"],
     "hourColour": "#F7D51D",
     "minuteColour": "#0046AF",
     "accentColour": "#E60012",
