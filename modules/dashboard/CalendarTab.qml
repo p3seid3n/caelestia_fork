@@ -3,46 +3,55 @@ pragma ComponentBehavior: Bound
 import "calendar"
 import QtQuick
 import QtQuick.Layouts
-import M3Shapes
 import Caelestia.Config
 import Caelestia.I18n
 import qs.components
 import qs.components.controls
 import qs.services
 
-// Dashboard "Calendar" tab: a big month (ISO week numbers where weeks start on Monday, dots for days
-// with events) and a panel with the chosen day's agenda. Events come from the user's own list and from
-// online calendars subscribed to by link (services/Calendars.qml).
-// The shown month is shared with the small calendar of the Dashboard tab (screenState.dashboardDate).
+// Dashboard "Calendar" tab: a calendar for school and everything else.
+//   Month - month grid (dots per lesson in subject colours, red mark on exam days) next to the
+//           chosen day's agenda (exams, homework to tick off, events, lessons, coming up)
+//   Week  - the timetable; click an empty slot to add something at that time
+// Calendars come from links (school timetable from portal.sbl.ch, Google, Outlook, ...) and
+// imported .ics files (services/Calendars.qml); homework and exams typed in by hand are in
+// services/Assignments.qml. The shown month is shared with the small calendar of the Dashboard
+// tab (screenState.dashboardDate). Scroll to change month or week, middle-click for today.
 CustomMouseArea {
     id: root
 
     required property ScreenState screenState
 
-    // The day whose agenda is shown on the right.
+    // The day whose agenda is shown, and the week the week view shows.
     property date selected: new Date()
+    readonly property bool week: Calendars.view === "week"
     // Read by Content.qml: keyboard focus while a sheet with text fields is open.
-    readonly property bool wantsInput: eventSheet.open || sourcesSheet.open
-
-    readonly property int year: screenState.dashboardDate.getFullYear()
-    readonly property int month: screenState.dashboardDate.getMonth()
-    // 0 = Sunday ... 6 = Saturday, as Date.getDay(); `% 7` also covers a locale that reports Sunday as 7.
+    readonly property bool wantsInput: newSheet.open || sourcesSheet.open
     readonly property int firstDay: Qt.locale().firstDayOfWeek % 7
-    readonly property bool showWeeks: firstDay === 1
+    readonly property date weekStart: {
+        const offset = (selected.getDay() - firstDay + 7) % 7;
+        return new Date(selected.getFullYear(), selected.getMonth(), selected.getDate() - offset);
+    }
     readonly property bool onToday: {
         const now = new Date();
-        return now.getFullYear() === year && now.getMonth() === month;
-    }
-    // Six full weeks, starting with the week the 1st falls in.
-    readonly property var days: {
-        const offset = (new Date(year, month, 1).getDay() - firstDay + 7) % 7;
-        return Array.from({
-            length: 42
-        }, (_, i) => new Date(year, month, 1 - offset + i));
+        if (week)
+            return weekView.sameDay(weekStart, new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() - firstDay + 7) % 7));
+        return now.getFullYear() === screenState.dashboardDate.getFullYear() && now.getMonth() === screenState.dashboardDate.getMonth() && monthView.sameDay(selected, now);
     }
 
-    function shiftMonth(by: int): void {
-        screenState.dashboardDate = new Date(year, month + by, 1);
+    function shift(by: int): void {
+        if (week) {
+            selected = new Date(selected.getFullYear(), selected.getMonth(), selected.getDate() + by * 7);
+            screenState.dashboardDate = new Date(selected.getFullYear(), selected.getMonth(), 1);
+        } else {
+            const d = screenState.dashboardDate;
+            screenState.dashboardDate = new Date(d.getFullYear(), d.getMonth() + by, 1);
+        }
+    }
+
+    function goToday(): void {
+        screenState.dashboardDate = new Date();
+        selected = new Date();
     }
 
     function isoWeek(d: date): int {
@@ -52,254 +61,236 @@ CustomMouseArea {
         return Math.ceil(((t - start) / 86400000 + 1) / 7);
     }
 
-    function goToday(): void {
-        screenState.dashboardDate = new Date();
-        selected = new Date();
+    function minutesOf(ms: double): int {
+        const d = new Date(ms);
+        return d.getHours() * 60 + d.getMinutes();
     }
 
-    function sameDay(a: date, b: date): bool {
-        return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    function openNew(day: date, minutes: int, kind: string, subject: string): void {
+        detailsSheet.open = false;
+        newItem.openNew(day, minutes, kind);
+        if (subject !== "")
+            newItem.subject = subject;
+        newSheet.open = true;
+    }
+
+    function openTask(t: var): void {
+        newItem.openTask(t);
+        newSheet.open = true;
+    }
+
+    function openEvent(e: var): void {
+        details.event = e;
+        detailsSheet.open = true;
     }
 
     function onWheel(event: WheelEvent): void {
-        shiftMonth(event.angleDelta.y > 0 ? -1 : 1);
+        shift(event.angleDelta.y > 0 ? -1 : 1);
     }
 
     implicitWidth: 840
-    // The sheets need some room however short the month is.
-    implicitHeight: Math.max(layout.implicitHeight, 450) + Tokens.padding.large * 2
+    implicitHeight: 470 + Tokens.padding.large * 2
 
     acceptedButtons: Qt.MiddleButton
     onClicked: goToday()
 
-
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
         anchors.margins: Tokens.padding.large
-        spacing: Tokens.spacing.large
+        spacing: Tokens.spacing.small
 
-        ColumnLayout {
-            id: layout
-
+        RowLayout {
             Layout.fillWidth: true
-            Layout.alignment: Qt.AlignTop
             spacing: Tokens.spacing.small
 
-            RowLayout {
+            Item {
                 Layout.fillWidth: true
-                spacing: Tokens.spacing.small
+                implicitHeight: title.implicitHeight
+                clip: true
 
                 StyledText {
-                    Layout.fillWidth: true
-                    text: Qt.locale().monthName(root.month) + " " + root.year
+                    id: title
+
+                    width: parent.width
+                    elide: Text.ElideRight
+                    opacity: root.week ? weekView.animOpacity : monthView.animOpacity
+                    transform: Translate {
+                        x: root.week ? weekView.animTranslate : monthView.animTranslate
+                    }
+                    text: {
+                        if (root.week) {
+                            const s = weekView.shownWeek;
+                            const e = new Date(s.getFullYear(), s.getMonth(), s.getDate() + 6);
+                            return Tr.tr("Week %1").arg(root.isoWeek(s)) + "  ·  " + s.toLocaleDateString(Qt.locale(), "d MMM") + " – " + e.toLocaleDateString(Qt.locale(), "d MMM");
+                        }
+                        return Qt.locale().monthName(monthView.month) + " " + monthView.year;
+                    }
                     font: Tokens.font.body.builders.large.size(28).weight(Font.DemiBold).build()
                     color: Colours.palette.m3onSurface
                 }
-
-                TextButton {
-                    type: TextButton.Tonal
-                    horizontalPadding: Tokens.padding.extraLarge
-                    text: Tr.tr("Today")
-                    disabled: root.onToday && root.sameDay(root.selected, new Date())
-                    onClicked: root.goToday()
-                }
-
-                IconButton {
-                    type: IconButton.Text
-                    isRound: true
-                    icon: "chevron_left"
-                    onClicked: root.shiftMonth(-1)
-                }
-
-                IconButton {
-                    type: IconButton.Text
-                    isRound: true
-                    icon: "chevron_right"
-                    onClicked: root.shiftMonth(1)
-                }
             }
 
-            // Weekday names
-            RowLayout {
+            IconTextButton {
+                type: IconTextButton.Tonal
+                checked: !root.week
+                icon: "calendar_view_month"
+                text: Tr.tr("Month")
+                onClicked: Calendars.view = "month"
+            }
+
+            IconTextButton {
+                type: IconTextButton.Tonal
+                checked: root.week
+                icon: "calendar_view_week"
+                text: Tr.tr("Week")
+                onClicked: Calendars.view = "week"
+            }
+
+            TextButton {
+                type: TextButton.Tonal
+                horizontalPadding: Tokens.padding.extraLarge
+                text: Tr.tr("Today")
+                disabled: root.onToday
+                onClicked: root.goToday()
+            }
+
+            IconButton {
+                type: IconButton.Text
+                isRound: true
+                icon: "chevron_left"
+                onClicked: root.shift(-1)
+            }
+
+            IconButton {
+                type: IconButton.Text
+                isRound: true
+                icon: "chevron_right"
+                onClicked: root.shift(1)
+            }
+        }
+
+        // Month: grid and the chosen day
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: !root.week
+            spacing: Tokens.spacing.large
+
+            MonthView {
+                id: monthView
+
                 Layout.fillWidth: true
-                spacing: 0
-
-                Item {
-                    visible: root.showWeeks
-                    implicitWidth: 44
-                }
-
-                Repeater {
-                    model: 7
-
-                    StyledText {
-                        required property int index
-                        readonly property int dayOfWeek: (root.firstDay + index) % 7
-
-                        Layout.fillWidth: true
-                        Layout.preferredWidth: 1
-                        horizontalAlignment: Text.AlignHCenter
-                        text: Qt.locale().dayName(dayOfWeek, Locale.ShortFormat)
-                        font: Tokens.font.body.builders.small.weight(Font.Medium).build()
-                        color: dayOfWeek === 0 || dayOfWeek === 6 ? Colours.palette.m3tertiary : Colours.palette.m3onSurfaceVariant
-                    }
+                Layout.alignment: Qt.AlignTop
+                screenState: root.screenState
+                selected: root.selected
+                onPicked: day => {
+                    root.selected = day;
+                    if (day.getMonth() !== monthView.month)
+                        root.screenState.dashboardDate = new Date(day.getFullYear(), day.getMonth(), 1);
                 }
             }
 
-            // Weeks
-            Repeater {
-                model: 6
+            StyledRect {
+                Layout.fillHeight: true
+                implicitWidth: 1
+                color: Colours.palette.m3outlineVariant
+                opacity: 0.5
+            }
 
-                RowLayout {
-                    id: week
-
-                    required property int index
-
-                    Layout.fillWidth: true
-                    spacing: 0
-
-                    StyledText {
-                        visible: root.showWeeks
-                        Layout.preferredWidth: 44
-                        horizontalAlignment: Text.AlignHCenter
-                        text: root.isoWeek(root.days[week.index * 7 + 3])
-                        font: Tokens.font.body.small
-                        color: Colours.palette.m3outline
-                    }
-
-                    Repeater {
-                        model: 7
-
-                        Item {
-                            id: cell
-
-                            required property int index
-                            readonly property date day: root.days[week.index * 7 + index]
-                            readonly property bool today: root.sameDay(day, new Date())
-                            readonly property bool inMonth: day.getMonth() === root.month
-                            readonly property bool weekend: day.getDay() === 0 || day.getDay() === 6
-                            readonly property bool chosen: root.sameDay(day, root.selected)
-                            readonly property var dots: Calendars.dotsOn(day)
-
-                            Layout.fillWidth: true
-                            Layout.preferredWidth: 1
-                            implicitHeight: 54
-
-                            MaterialShape {
-                                anchors.centerIn: parent
-                                implicitSize: Math.min(cell.width, cell.height) - Tokens.padding.extraSmall
-                                shape: MaterialShape.Sunny
-                                color: Colours.palette.m3primary
-                                opacity: cell.today ? 1 : 0
-
-                                Behavior on opacity {
-                                    Anim {
-                                        type: Anim.DefaultEffects
-                                    }
-                                }
-                            }
-
-                            // The chosen day (today is already marked by its shape).
-                            StyledRect {
-                                anchors.centerIn: parent
-                                implicitWidth: Math.min(cell.width, cell.height) - Tokens.padding.extraSmall
-                                implicitHeight: implicitWidth
-                                radius: Tokens.rounding.full
-                                color: "transparent"
-                                border.width: 2
-                                border.color: Colours.palette.m3primary
-                                opacity: cell.chosen && !cell.today ? 1 : 0
-
-                                Behavior on opacity {
-                                    Anim {
-                                        type: Anim.DefaultEffects
-                                    }
-                                }
-                            }
-
-                            StyledText {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.verticalCenterOffset: cell.dots.length > 0 ? -4 : 0
-                                text: cell.day.getDate()
-                                font: cell.today ? Tokens.font.body.builders.medium.weight(Font.DemiBold).build() : Tokens.font.body.medium
-                                color: cell.today ? Colours.palette.m3onPrimary : cell.weekend ? Colours.palette.m3tertiary : Colours.palette.m3onSurface
-                                opacity: cell.inMonth || cell.today ? 1 : 0.35
-                            }
-
-                            // One dot per calendar that has something on this day.
-                            Row {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                anchors.bottom: parent.bottom
-                                anchors.bottomMargin: Tokens.padding.small
-                                spacing: 3
-                                opacity: cell.inMonth ? 1 : 0.4
-
-                                Repeater {
-                                    model: cell.dots
-
-                                    StyledRect {
-                                        required property string modelData
-
-                                        implicitWidth: 5
-                                        implicitHeight: 5
-                                        radius: Tokens.rounding.full
-                                        color: cell.today ? Colours.palette.m3onPrimary : Calendars.colourFor(modelData)
-                                    }
-                                }
-                            }
-
-                            // Choose the day; one of the neighbouring month also jumps to that month.
-                            StateLayer {
-                                radius: Tokens.rounding.large
-                                onClicked: {
-                                    root.selected = cell.day;
-                                    if (!cell.inMonth)
-                                        root.screenState.dashboardDate = new Date(cell.day.getFullYear(), cell.day.getMonth(), 1);
-                                }
-                            }
-                        }
-                    }
+            DayAgenda {
+                Layout.fillHeight: true
+                Layout.preferredWidth: 290
+                day: root.selected
+                onAddRequested: root.openNew(root.selected, -1, "event", "")
+                onCalendarsRequested: {
+                    sources.reset();
+                    sourcesSheet.open = true;
                 }
+                onEventPicked: e => root.openEvent(e)
+                onTaskPicked: t => root.openTask(t)
             }
         }
 
-    // Chosen day
-    StyledRect {
-        Layout.fillHeight: true
-        implicitWidth: 1
-        color: Colours.palette.m3outlineVariant
-        opacity: 0.5
-    }
-
-    DayAgenda {
-        Layout.fillHeight: true
-        Layout.preferredWidth: 280
-        day: root.selected
-        onAddRequested: {
-            newEvent.day = root.selected;
-            newEvent.reset();
-            eventSheet.open = true;
-        }
-        onCalendarsRequested: {
-            sources.reset();
-            sourcesSheet.open = true;
-        }
-    }
-    }
-
-    Sheet {
-        id: eventSheet
-
-        title: Tr.tr("New event")
-        onClosed: open = false
-
-        NewEvent {
-            id: newEvent
+        // Week: the timetable
+        WeekView {
+            id: weekView
 
             Layout.fillWidth: true
             Layout.fillHeight: true
-            onSaved: eventSheet.open = false
+            visible: root.week
+            weekStart: root.weekStart
+            selected: root.selected
+            onSlotPicked: (day, minutes) => root.openNew(day, minutes, "event", "")
+            onEventPicked: e => root.openEvent(e)
+            onTaskPicked: t => root.openTask(t)
+            onDayPicked: day => {
+                root.selected = day;
+                Calendars.view = "month";
+                root.screenState.dashboardDate = new Date(day.getFullYear(), day.getMonth(), 1);
+            }
+        }
+    }
+
+    // Week view: calendars button and "+" in the corner, where the agenda has them in month view.
+    Row {
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: Tokens.padding.large
+        visible: root.week
+        spacing: Tokens.spacing.small
+        z: 5
+
+        IconButton {
+            type: IconButton.Tonal
+            isRound: true
+            icon: "event_list"
+            onClicked: {
+                sources.reset();
+                sourcesSheet.open = true;
+            }
+        }
+
+        IconButton {
+            type: IconButton.Filled
+            isRound: true
+            icon: "add"
+            onClicked: root.openNew(root.selected, -1, "event", "")
+        }
+    }
+
+    Sheet {
+        id: newSheet
+
+        title: newItem.editKind !== "" ? Tr.tr("Edit") : Tr.tr("New")
+        onClosed: open = false
+
+        NewItem {
+            id: newItem
+
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            onSaved: newSheet.open = false
+        }
+    }
+
+    Sheet {
+        id: detailsSheet
+
+        title: details.event?.kind === "lesson" ? Tr.tr("Lesson") : details.event?.kind === "test" ? Tr.tr("Exam") : Tr.tr("Event")
+        onClosed: open = false
+
+        EventDetails {
+            id: details
+
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            onDone: detailsSheet.open = false
+            onAddRequested: (kind, subject, start) => root.openNew(new Date(start), root.minutesOf(start), kind, subject)
+            onEditRequested: e => {
+                detailsSheet.open = false;
+                newItem.openEvent(Calendars.localEvents.find(x => x.id === e.id) ?? e);
+                newSheet.open = true;
+            }
         }
     }
 
@@ -314,6 +305,7 @@ CustomMouseArea {
 
             Layout.fillWidth: true
             Layout.fillHeight: true
+            onImportRequested: (kind, name) => Calendars.requestImport(kind, name)
         }
     }
 }

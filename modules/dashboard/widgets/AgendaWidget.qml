@@ -74,7 +74,7 @@ Item {
                     Layout.bottomMargin: Tokens.padding.small
                     implicitWidth: 4
                     radius: Tokens.rounding.full
-                    color: Calendars.colourOf(row.modelData.cal)
+                    color: row.modelData.accent
                 }
 
                 ColumnLayout {

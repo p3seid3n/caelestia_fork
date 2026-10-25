@@ -97,7 +97,7 @@ Item {
                         implicitHeight: 4
                         radius: Tokens.rounding.full
                         visible: cell.dots.length > 0 && cell.inMonth && cell.height > 26
-                        color: cell.today ? Colours.palette.m3onPrimary : Calendars.colourFor(cell.dots[0] ?? "primary")
+                        color: cell.today ? Colours.palette.m3onPrimary : (cell.dots[0] ?? Colours.palette.m3primary)
                     }
                 }
             }

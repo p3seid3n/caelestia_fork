@@ -7,6 +7,7 @@ import Caelestia.Config
 import Caelestia.I18n
 import qs.components
 import qs.components.filedialog
+import qs.services
 import qs.utils
 
 Item {
@@ -27,6 +28,22 @@ Item {
         }
     }
 
+    // .ics import for the Calendar tab. It lives here, not in the tab, so it survives the drawer
+    // closing while the dialog has the pointer.
+    readonly property FileDialog icsPicker: FileDialog {
+        title: Tr.tr("Import a calendar")
+        filterLabel: Tr.tr("Calendar files")
+        filters: ["ics", "ical", "icalendar", "ifb"]
+        onAccepted: path => {
+            const id = Calendars.newId();
+            if (CUtils.copyFile(Qt.resolvedUrl(path), Qt.resolvedUrl(Calendars.fileFor(id))))
+                Calendars.addFile(id, Calendars.importName, Calendars.importKind);
+            else
+                // TRANSLATORS: %1 = a file path
+                Quickshell.execDetached(["notify-send", "-a", "caelestia-shell", "-u", "critical", Tr.tr("Unable to import calendar"), Tr.tr("Could not copy %1").arg(Paths.shortenHome(path))]);
+        }
+    }
+
     readonly property real nonAnimHeight: (content.item as Content)?.nonAnimHeight ?? 0
     readonly property bool shouldBeActive: screenState.dashboard && Config.dashboard.enabled
     property real offsetScale: shouldBeActive ? 0 : 1
@@ -39,6 +56,14 @@ Item {
 
     Behavior on offsetScale {
         Anim {}
+    }
+
+    Connections {
+        function onImportRequested(): void {
+            root.icsPicker.open();
+        }
+
+        target: Calendars
     }
 
     Loader {

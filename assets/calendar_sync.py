@@ -8,8 +8,13 @@ Input (environment variable KAIROS_CAL_INPUT, so links never show up on a comman
      "calendars": [{"id": "abc", "url": "https://..."}]}
 
 Output (stdout):
-    {"events": [{"id", "cal", "uid", "title", "location", "allDay", "start", "end"}],
-     "errors": [{"cal": "abc", "message": "HTTP 403"}]}
+    {"events": [{"id", "cal", "uid", "title", "location", "allDay", "start", "end",
+                 "kind", "code", "teacher", "note", "cancelled"}],
+     "errors": [{"cal": "abc", "message": "HTTP 403"}],
+     "names": {"abc": "name the calendar gives itself"}}
+
+A calendar entry can name a local file ("path") instead of a link, and can be marked
+"school": true for schulNetz timetables (lessons by course code, exams detected, see below).
 
 `start` and `end` are epoch milliseconds. All-day events run from local midnight of the
 first day to local midnight after the last day. Recurring events are expanded for the
@@ -19,6 +24,7 @@ range, with exceptions (EXDATE) and single changed occurrences (RECURRENCE-ID) a
 import calendar
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -459,10 +465,151 @@ def expand(cal_id, raws, range_start, range_end):
     return out
 
 
+# ---------------------------------------------------------------- school timetables
+#
+# Basel-Landschaft Gymnasien (schulNetz / Centerboard, portal.sbl.ch) name lessons by course code:
+# "E-2e-FiB" = subject E, class 2e, teacher FiB; "fCR" = Freifach CR. Exams either carry a word
+# like "Prüfung" or show up as a second event in the same slot as the lesson, with the exam's name.
+
+TEST_RE = re.compile(
+    r"(prüfung|pruefung|\bprüf\b|\btest\b|klausur|\bexam|lernkontrolle|\blk\b|probe|schriftlich|"
+    r"vokabeltest|vocab|quiz|vortrag|präsentation|abgabe|maturaprüfung)",
+    re.I,
+)
+# Second events in a lesson's slot that are not exams.
+CANCEL_RE = re.compile(r"(ausfall|entfällt|entfaellt|fällt aus|faellt aus|abgesagt|cancel)", re.I)
+NOT_EXAM_RE = re.compile(r"(ausfall|entfällt|entfaellt|fällt aus|faellt aus|verschoben|zimmerwechsel|raumwechsel|vertretung|abgesagt|cancel)", re.I)
+COURSE_RE = re.compile(r"^(f?)([A-Za-zÄÖÜ]{1,5})-(\d+[a-zA-Z]+(?:,\s*\d+[a-zA-Z]+)*)-([A-Za-zÄÖÜäöü]{2,5})$")
+COURSE_IN_TEXT_RE = re.compile(r"\b(f?[A-Z][A-Za-z]{0,4})-(\d+[a-z]+(?:,\d+[a-z]+)*)-([A-Z][a-zäöü]+[A-Z]?)\b")
+FREIFACH_RE = re.compile(r"^f([A-Z]{1,5})$")
+SUBJECT_WORDS = [
+    (r"anwendungen der math", "AM"),
+    (r"\bmathe|mathematik|\bmath\b", "M"),
+    (r"deutsch", "D"),
+    (r"englisch|english", "E"),
+    (r"französisch|franzoesisch|franz|french", "F"),
+    (r"italienisch", "I"),
+    (r"spanisch", "S"),
+    (r"latein", "L"),
+    (r"physik", "P"),
+    (r"chemie", "C"),
+    (r"biologie|\bbio\b", "B"),
+    (r"geschichte", "G"),
+    (r"geografie|geographie", "GG"),
+    (r"informatik", "IN"),
+    (r"musik", "MU"),
+    (r"sport", "SP"),
+    (r"wirtschaft", "WR"),
+    (r"ethik", "ET"),
+    (r"bildnerisch|\bbg\b", "BG"),
+]
+
+
+def norm_code(prefix, letters):
+    return ("f" if prefix else "") + letters.upper()
+
+
+def classify(title):
+    """(kind, code, teacher, note) for one school event title."""
+    t = title.strip()
+    is_test = bool(TEST_RE.search(t))
+    m = COURSE_RE.match(t)
+    if m:
+        return ("test" if is_test else "lesson"), norm_code(m.group(1), m.group(2)), m.group(4), ""
+    f = FREIFACH_RE.match(t)
+    if f:
+        return ("test" if is_test else "lesson"), "f" + f.group(1), "", ""
+    inner = COURSE_IN_TEXT_RE.search(t)
+    if inner:
+        code = inner.group(1)
+        code = "f" + code[1:].upper() if code.startswith("f") else code.upper()
+        note = re.sub(r"\s+", " ", t[: inner.start()] + " " + t[inner.end() :]).strip(" -–:·,")
+        # A course code plus text: an exam when it says so, otherwise decided by the slot rule below.
+        return ("test" if is_test else "annotated"), code, inner.group(3), note
+    if is_test:
+        low = t.lower()
+        code = next((c for pattern, c in SUBJECT_WORDS if re.search(pattern, low)), "")
+        return "test", code, "", t
+    return "event", "", "", ""
+
+
+def mark_school(events):
+    """Classifies a school calendar's events and folds exam duplicates into one exam event."""
+    for e in events:
+        kind, code, teacher, note = classify(e["title"]) if not e["allDay"] else ("event", "", "", "")
+        e["kind"], e["code"], e["teacher"], e["note"] = kind, code, teacher, note
+        e["cancelled"] = False
+
+    lessons = [e for e in events if e["kind"] == "lesson"]
+    by_slot = {}
+    for e in lessons:
+        by_slot.setdefault((e["start"], e["end"]), []).append(e)
+
+    def overlapping_lessons(e):
+        exact = by_slot.get((e["start"], e["end"]), [])
+        if exact:
+            return exact
+        return [l for l in lessons if l["start"] < e["end"] and e["start"] < l["end"]]
+
+    dropped = set()
+    for e in events:
+        if e["kind"] in ("lesson",) or e["allDay"]:
+            continue
+        slot = overlapping_lessons(e)
+        if e["kind"] == "annotated":
+            same = [l for l in slot if l["code"] == e["code"]]
+            if same and not NOT_EXAM_RE.search(e["title"]):
+                e["kind"] = "test"
+            else:
+                # A note on the lesson ("fällt aus", room change): it replaces the plain copy.
+                e["kind"] = "lesson"
+                e["cancelled"] = bool(CANCEL_RE.search(e["title"]))
+                for l in same:
+                    dropped.add(l["id"])
+                    if not e["location"]:
+                        e["location"] = l["location"]
+        elif e["kind"] == "event" and slot and not NOT_EXAM_RE.search(e["title"]):
+            # Same slot as a lesson, different name: the lesson's exam ("lesson shows up twice").
+            if len(slot) == 1 or any(l["start"] == e["start"] and l["end"] == e["end"] for l in slot):
+                lesson = next((l for l in slot if l["start"] == e["start"] and l["end"] == e["end"]), slot[0])
+                e["kind"], e["code"], e["teacher"], e["note"] = "test", lesson["code"], lesson["teacher"], e["title"]
+                if not e["location"]:
+                    e["location"] = lesson["location"]
+        if e["kind"] == "test" and e["code"]:
+            for l in slot:
+                if l["code"] == e["code"]:
+                    dropped.add(l["id"])
+                    if not e["location"]:
+                        e["location"] = l["location"]
+    return [e for e in events if e["id"] not in dropped]
+
+
+def plain_kinds(events):
+    """Kinds for ordinary calendars: exams only when the title says so."""
+    for e in events:
+        is_test = not e["allDay"] and bool(TEST_RE.search(e["title"]))
+        e["kind"], e["code"], e["teacher"], e["note"] = ("test" if is_test else "event"), "", "", ""
+        e["cancelled"] = False
+    return events
+
+
+# ---------------------------------------------------------------- input
+
+
+def repair(text):
+    """Some servers cut feeds off mid-event; keep everything up to the last complete VEVENT."""
+    if re.search(r"END:VCALENDAR\s*$", text.strip(), re.I):
+        return text
+    last = text.rfind("END:VEVENT")
+    return text if last == -1 else text[: last + len("END:VEVENT")] + "\r\nEND:VCALENDAR\r\n"
+
+
 def fetch(url):
     url = url.strip()
     if url.lower().startswith("webcal://"):
         url = "https://" + url[9:]
+    elif url.lower().startswith("webcals://"):
+        url = "https://" + url[10:]
     allowed = ("https://", "http://") + (("file://",) if os.environ.get("KAIROS_CAL_ALLOW_FILE") else ())
     if not url.lower().startswith(allowed):
         raise ValueError("Address must start with https://")
@@ -474,25 +621,38 @@ def fetch(url):
     return data.decode("utf-8", errors="replace")
 
 
+def read_file(path):
+    """An imported .ics file, copied by the shell into its state folder."""
+    if os.path.getsize(path) > MAX_BYTES:
+        raise ValueError("Calendar is too large")
+    with open(path, "rb") as handle:
+        return handle.read().decode("utf-8", errors="replace")
+
+
 def main():
     job = json.loads(os.environ.get("KAIROS_CAL_INPUT", "{}"))
     range_start = datetime.combine(date.fromisoformat(job["from"]), time.min, tzinfo=LOCAL)
     range_end = datetime.combine(date.fromisoformat(job["to"]), time.min, tzinfo=LOCAL)
-    events, errors = [], []
+    events, errors, names = [], [], {}
     for cal in job.get("calendars", []):
         cal_id = str(cal.get("id", ""))
         try:
-            text = fetch(cal.get("url", ""))
+            text = read_file(cal["path"]) if cal.get("path") else fetch(cal.get("url", ""))
+            text = repair(text.lstrip("\ufeff"))
             if "BEGIN:VCALENDAR" not in text.upper():
                 raise ValueError("Not a calendar file")
-            events.extend(expand(cal_id, parse_events(text), range_start, range_end))
+            name = re.search(r"^X-WR-CALNAME:(.+)$", text, re.M)
+            if name:
+                names[cal_id] = unescape(name.group(1).strip())
+            found = expand(cal_id, parse_events(text), range_start, range_end)
+            events.extend(mark_school(found) if cal.get("school") else plain_kinds(found))
         except urllib.error.HTTPError as error:
             errors.append({"cal": cal_id, "message": f"HTTP {error.code}"})
         except urllib.error.URLError:
             errors.append({"cal": cal_id, "message": "Could not reach the server"})
         except Exception as error:  # a broken calendar must not take the others down
             errors.append({"cal": cal_id, "message": str(error)[:120] or "Could not read the calendar"})
-    json.dump({"events": events, "errors": errors}, sys.stdout)
+    json.dump({"events": events, "errors": errors, "names": names}, sys.stdout)
 
 
 if __name__ == "__main__":

@@ -6,24 +6,33 @@ import Quickshell.Io
 import Caelestia.I18n
 import qs.utils
 
-// Events for the dashboard Calendar tab: the user's own events plus any number of
-// online calendars that are subscribed to by link (Google "secret address in iCal format",
-// Outlook "published calendar" ICS link, Nextcloud, iCloud public links, holiday calendars ...).
+// Events for the dashboard Calendar tab: the user's own events plus any number of calendars
+// subscribed to by link (school timetable from portal.sbl.ch, Google "secret address in iCal
+// format", Outlook "published calendar" ICS link, Nextcloud, iCloud, holidays ...) or imported
+// from an .ics file.
 //
-// Online calendars are read-only. Their links contain a secret, so they are kept in the
+// School calendars are read as schulNetz timetables: lessons are matched to subjects
+// (services/Subjects.qml) and exams are recognised (see assets/calendar_sync.py). Homework and
+// exams typed in by hand live in services/Assignments.qml; upcoming() merges both.
+//
+// Subscribed calendars are read-only. Their links contain a secret, so they are kept in the
 // system keyring through `secret-tool` (package: libsecret) and handed to the sync helper
-// (assets/calendar_sync.py) through an environment variable, never on a command line.
-// Everything else (names, colours, own events) is in ~/.local/state/caelestia/calendar.json.
+// through an environment variable, never on a command line. Imported files are copied to
+// ~/.local/state/caelestia/calendar-<id>.ics. Everything else (names, colours, own events)
+// is in ~/.local/state/caelestia/calendar.json.
 Singleton {
     id: root
 
-    // Subscribed calendars: [{id, name, colour}]. `colour` is "primary", "secondary", "tertiary" or "error".
+    // Calendars: [{id, name, colour, kind, file, autoName}]. `colour` is "primary", "secondary",
+    // "tertiary" or "error"; `kind` is "school" (schulNetz timetable) or "other"; `file` is the
+    // path of an imported .ics (empty for links); `autoName` takes the name the calendar gives itself.
     property var sources: []
     // Ids of calendars (also "local") whose events are hidden.
     property var hidden: []
     // The user's own events: [{id, title, location, allDay, start, end}] with epoch milliseconds.
     property var localEvents: []
-    // Events from the online calendars, same shape plus `cal`.
+    // Events from the calendars, same shape plus `cal`, `kind` ("lesson", "test" or "event"),
+    // `code`, `teacher`, `note` and `cancelled` (see assets/calendar_sync.py).
     property var remoteEvents: []
     // Per calendar id: what went wrong on the last sync.
     property var errors: ({})
@@ -32,6 +41,11 @@ Singleton {
     property string statusText
     property double lastSync
     property string keyringError
+    // "month" or "week": the Calendar tab's view, kept while the shell runs.
+    property string view: "month"
+    // What the next imported .ics file becomes (set by requestImport()).
+    property string importKind: "other"
+    property string importName
 
     // calendar id -> link; only in memory, loaded from and saved to the keyring.
     property var urls: ({})
@@ -43,18 +57,30 @@ Singleton {
     readonly property string localId: "local"
     readonly property var colourCycle: ["tertiary", "secondary", "error", "primary"]
 
-    // Everything that is shown, newest data from every visible calendar.
+    // Everything that is shown, from every visible calendar, each with its `subject` id
+    // ("" when it has none). Lessons of hidden subjects are left out.
     readonly property var events: {
         const out = [];
         if (!hidden.includes(localId)) {
             for (const e of localEvents)
                 out.push(Object.assign({
-                    cal: localId
+                    cal: localId,
+                    kind: "event",
+                    note: "",
+                    cancelled: false
                 }, e));
         }
+        const hiddenSubjects = Subjects.hiddenIds;
+        const codes = Subjects.codeIndex;
         for (const e of remoteEvents) {
-            if (!hidden.includes(e.cal))
-                out.push(e);
+            if (hidden.includes(e.cal))
+                continue;
+            const subject = e.code ? (codes[e.code] ?? "") : "";
+            if (e.kind === "lesson" && subject !== "" && hiddenSubjects.includes(subject))
+                continue;
+            out.push(Object.assign({}, e, {
+                subject: subject
+            }));
         }
         out.sort((a, b) => (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) || a.start - b.start);
         return out;
@@ -88,6 +114,9 @@ Singleton {
         return map;
     }
 
+    // Asks the dashboard (modules/dashboard/Wrapper.qml) to open its .ics file picker.
+    signal importRequested
+
     function keyOf(day: date): string {
         return day.getFullYear() + "-" + day.getMonth() + "-" + day.getDate();
     }
@@ -96,23 +125,117 @@ Singleton {
         return byDay[keyOf(day)] ?? [];
     }
 
-    // Colours (palette keys) of the calendars that have something on a day, at most three.
+    function lessonsOn(day: date): var {
+        return eventsOn(day).filter(e => e.kind === "lesson");
+    }
+
+    // What is on a day apart from lessons: exams, other events.
+    function specialOn(day: date): var {
+        return eventsOn(day).filter(e => e.kind !== "lesson");
+    }
+
+    // Colours of the dots under a day in the month grid: one per lesson in its subject's colour,
+    // then one per other calendar with something that day.
     function dotsOn(day: date): var {
         const found = [];
+        const cals = [];
         for (const e of eventsOn(day)) {
-            const colour = colourKeyOf(e.cal);
-            if (!found.includes(colour))
-                found.push(colour);
-            if (found.length >= 3)
+            if (e.kind === "lesson") {
+                if (!e.cancelled)
+                    found.push(Subjects.colourOf(e.subject));
+            } else if (e.kind !== "test" && !cals.includes(e.cal)) {
+                cals.push(e.cal);
+                found.push(colourOf(e.cal));
+            }
+            if (found.length >= 8)
                 break;
         }
         return found;
     }
 
-    // The next events that have not ended yet, soonest first.
+    // Whether an exam is due that day (from the timetable or typed in).
+    function hasExam(day: date): bool {
+        return eventsOn(day).some(e => e.kind === "test") || Assignments.on(day).some(i => i.type === "exam" && !i.done);
+    }
+
+    // Accent colour of an event: its subject's for school events, its calendar's otherwise.
+    function accentOf(e: var): color {
+        return e.subject ? Subjects.colourOf(e.subject) : colourOf(e.cal);
+    }
+
+    // Readable title: "Mathematik" for a lesson, "Prüfung Deutsch" for "Prüfung D-2e-FiB",
+    // the exam's own name otherwise.
+    function titleOf(e: var): string {
+        const subject = e.subject ? Subjects.nameOf(e.subject) : "";
+        if (e.kind === "lesson" && subject !== "")
+            return subject;
+        if (e.kind === "test" && subject !== "") {
+            const token = /\bf?[A-Za-z]{1,5}-\d+[a-z]+(?:,\d+[a-z]+)*-[A-Za-zÄÖÜäöü]{2,5}\b/;
+            if (token.test(e.title))
+                return e.title.replace(token, subject).replace(/\s+/g, " ").trim();
+        }
+        return e.title;
+    }
+
+    // Second line under a title: exam's subject, room, teacher, note.
+    function detailOf(e: var): string {
+        const parts = [];
+        if (e.kind === "test" && e.subject && !titleOf(e).includes(Subjects.nameOf(e.subject)))
+            parts.push(Subjects.nameOf(e.subject));
+        if (e.kind === "lesson" && e.note)
+            parts.push(e.note);
+        if (e.location)
+            parts.push(e.location);
+        if (e.teacher)
+            parts.push(e.teacher);
+        return parts.join(" · ");
+    }
+
+    // The next lesson of a subject after a moment, or null.
+    function nextLesson(subject: string, after: double): var {
+        return events.find(e => e.kind === "lesson" && e.subject === subject && !e.cancelled && e.start > after) ?? null;
+    }
+
+    // What is coming up, soonest first: exams and events from the calendars (no plain lessons) and
+    // open homework, exams and reminders. Items: {id, kind ("event", "test" or "task"), title,
+    // detail, start, end, allDay, accent, event | task}.
     function upcoming(count: int): var {
         const now = Date.now();
-        return events.filter(e => e.end > now || e.start >= now).slice().sort((a, b) => a.start - b.start).slice(0, count);
+        const out = [];
+        for (const e of events) {
+            if (e.kind === "lesson" || (e.end <= now && e.start < now))
+                continue;
+            out.push({
+                id: e.id,
+                kind: e.kind === "test" ? "test" : "event",
+                title: titleOf(e),
+                detail: detailOf(e),
+                start: e.start,
+                end: e.end,
+                allDay: e.allDay,
+                accent: accentOf(e),
+                event: e,
+                task: null
+            });
+        }
+        for (const i of Assignments.upcoming(count, true))
+            out.push(taskItem(i));
+        return out.sort((a, b) => a.start - b.start).slice(0, count);
+    }
+
+    function taskItem(i: var): var {
+        return {
+            id: i.id,
+            kind: "task",
+            title: i.title || Subjects.nameOf(i.subject),
+            detail: i.subject ? Subjects.nameOf(i.subject) : "",
+            start: i.due,
+            end: i.due,
+            allDay: !i.hasTime,
+            accent: i.subject ? Subjects.colourOf(i.subject) : Colours.palette.m3primary,
+            event: null,
+            task: i
+        };
     }
 
     function sourceOf(id: string): var {
@@ -169,18 +292,21 @@ Singleton {
         return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     }
 
-    // Subscribes to an online calendar. Returns an error text, or "" when it was added.
-    function addSource(name: string, url: string, colour: string): string {
+    // Subscribes to a calendar by link. Returns an error text, or "" when it was added.
+    function addSource(name: string, url: string, kind: string): string {
         const link = url.trim();
-        if (!/^(https?|webcal):\/\/\S+$/i.test(link))
+        if (!/^(https?|webcals?):\/\/\S+$/i.test(link))
             return Tr.tr("The address has to start with https:// or webcal://");
         const id = newId();
-        const label = name.trim() !== "" ? name.trim() : (/^[a-z]+:\/\/([^\/?#]+)/i.exec(link)?.[1] ?? Tr.tr("Calendar"));
+        const label = name.trim() !== "" ? name.trim() : (kind === "school" ? Tr.tr("Timetable") : (/^[a-z]+:\/\/([^\/?#]+)/i.exec(link)?.[1] ?? Tr.tr("Calendar")));
         sources = sources.concat([
             {
                 id: id,
                 name: label,
-                colour: colour || colourCycle[sources.length % colourCycle.length]
+                colour: colourCycle[sources.length % colourCycle.length],
+                kind: kind === "school" ? "school" : "other",
+                file: "",
+                autoName: name.trim() === "" && kind !== "school"
             }
         ]);
         const next = Object.assign({}, urls);
@@ -192,7 +318,44 @@ Singleton {
         return "";
     }
 
+    // A new calendar for an .ics file the caller has copied to fileFor(id).
+    function addFile(id: string, name: string, kind: string): void {
+        sources = sources.concat([
+            {
+                id: id,
+                name: name.trim() !== "" ? name.trim() : Tr.tr("Imported calendar"),
+                colour: colourCycle[sources.length % colourCycle.length],
+                kind: kind === "school" ? "school" : "other",
+                file: fileFor(id),
+                autoName: name.trim() === ""
+            }
+        ]);
+        save();
+        refresh();
+    }
+
+    function requestImport(kind: string, name: string): void {
+        importKind = kind;
+        importName = name;
+        importRequested();
+    }
+
+    function fileFor(id: string): string {
+        return `${Paths.state}/calendar-${id}.ics`;
+    }
+
+    function setKind(id: string, kind: string): void {
+        sources = sources.map(s => s.id === id ? Object.assign({}, s, {
+            kind: kind
+        }) : s);
+        save();
+        refresh();
+    }
+
     function removeSource(id: string): void {
+        const src = sourceOf(id);
+        if (src?.file)
+            Quickshell.execDetached(["rm", "-f", src.file]);
         sources = sources.filter(s => s.id !== id);
         hidden = hidden.filter(h => h !== id);
         remoteEvents = remoteEvents.filter(e => e.cal !== id);
@@ -210,7 +373,7 @@ Singleton {
         save();
     }
 
-    function addEvent(title: string, location: string, allDay: bool, start: double, end: double): void {
+    function addEvent(title: string, location: string, allDay: bool, start: double, end: double, subject: string): void {
         localEvents = localEvents.concat([
             {
                 id: newId(),
@@ -218,9 +381,15 @@ Singleton {
                 location: location.trim(),
                 allDay: allDay,
                 start: start,
-                end: Math.max(end, start)
+                end: Math.max(end, start),
+                subject: subject
             }
         ]);
+        save();
+    }
+
+    function updateEvent(id: string, changes: var): void {
+        localEvents = localEvents.map(e => e.id === id ? Object.assign({}, e, changes) : e);
         save();
     }
 
@@ -238,9 +407,11 @@ Singleton {
     function refresh(): void {
         if (!urlsLoaded)
             return;
-        const calendars = sources.filter(s => urls[s.id]).map(s => ({
+        const calendars = sources.filter(s => s.file || urls[s.id]).map(s => ({
                     id: s.id,
-                    url: urls[s.id]
+                    url: s.file ? "" : urls[s.id],
+                    path: s.file,
+                    school: s.kind === "school"
                 }));
         if (calendars.length === 0) {
             remoteEvents = [];
@@ -303,7 +474,10 @@ Singleton {
                     root.sources = c.sources.filter(s => typeof s.id === "string" && typeof s.name === "string").map(s => ({
                                 id: s.id,
                                 name: s.name,
-                                colour: ["primary", "secondary", "tertiary", "error"].includes(s.colour) ? s.colour : "secondary"
+                                colour: ["primary", "secondary", "tertiary", "error"].includes(s.colour) ? s.colour : "secondary",
+                                kind: s.kind === "school" ? "school" : "other",
+                                file: typeof s.file === "string" ? s.file : "",
+                                autoName: s.autoName === true
                             }));
                 if (Array.isArray(c.hidden))
                     root.hidden = c.hidden.filter(h => typeof h === "string");
@@ -314,7 +488,8 @@ Singleton {
                                 location: String(e.location ?? ""),
                                 allDay: e.allDay === true,
                                 start: e.start,
-                                end: typeof e.end === "number" ? e.end : e.start
+                                end: typeof e.end === "number" ? e.end : e.start,
+                                subject: typeof e.subject === "string" ? e.subject : ""
                             }));
             } catch (error) {
                 console.warn("Calendars: could not parse calendar.json:", error);
@@ -377,6 +552,19 @@ Singleton {
                 try {
                     const result = JSON.parse(text);
                     root.remoteEvents = (result.events ?? []).filter(e => typeof e.start === "number");
+                    // New course codes become subjects; names the calendars give themselves are used
+                    // for calendars added without one.
+                    Subjects.detect(root.remoteEvents.filter(e => e.code).map(e => ({
+                                code: e.code,
+                                teacher: e.teacher
+                            })));
+                    const names = result.names ?? {};
+                    if (root.sources.some(s => s.autoName && names[s.id] && names[s.id] !== s.name)) {
+                        root.sources = root.sources.map(s => s.autoName && names[s.id] ? Object.assign({}, s, {
+                                name: names[s.id]
+                            }) : s);
+                        root.save();
+                    }
                     const errs = {};
                     for (const e of result.errors ?? [])
                         errs[e.cal] = e.message;
