@@ -4,8 +4,8 @@ import qs.components
 
 // One clock digit.
 // - Rolls (old digit slides up and fades, new one rises in) whenever it changes.
-// - Two weights stacked on top of each other: thin for the AoD state, bold when awake.
-//   `boldness` crossfades between them, which reads as the glyph thickening.
+// - Thin in the AoD state, bold when awake: `boldness` drives the clock font's variable weight
+//   axis, so the glyph really thickens (in steps of 20, which looks continuous).
 Item {
     id: root
 
@@ -15,6 +15,7 @@ Item {
     property real boldness // 0 = thin (AoD), 1 = bold (awake)
 
     property string shown: digit
+    readonly property int weight: Math.round((300 + 400 * boldness) / 20) * 20
 
     // Same box for every digit so the clock never jitters sideways.
     implicitWidth: zeroMetrics.advanceWidth
@@ -25,11 +26,12 @@ Item {
             roll.restart();
     }
 
+    // Measured at the boldest weight so the box stays put while the weight changes.
     TextMetrics {
         id: zeroMetrics
 
         text: "0"
-        font: bold.font
+        font: Tokens.font.clock.size(root.pointSize).vaxis("wght", 700).build()
     }
 
     SequentialAnimation {
@@ -82,25 +84,11 @@ Item {
         height: root.height
 
         Text {
-            id: thin
-
             anchors.horizontalCenter: parent.horizontalCenter
             y: -(zeroMetrics.tightBoundingRect.y - zeroMetrics.boundingRect.y)
             text: root.shown
             color: root.colour
-            font: Tokens.font.clock.size(root.pointSize).vaxis("wght", 300).build()
-            opacity: 1 - root.boldness
-        }
-
-        Text {
-            id: bold
-
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: thin.y
-            text: root.shown
-            color: root.colour
-            font: Tokens.font.clock.size(root.pointSize).vaxis("wght", 700).build()
-            opacity: root.boldness
+            font: Tokens.font.clock.size(root.pointSize).vaxis("wght", root.weight).build()
         }
     }
 }

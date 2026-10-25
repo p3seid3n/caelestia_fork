@@ -9,6 +9,11 @@ Item {
     required property var greeter
     property bool main: true
     property real prog: win.greeter.awake ? 1 : 0
+    // Burn-in protection for the always-on clock, as on the lock screen.
+    property real driftX
+    property real driftY
+    // Power button waiting for its second click ("" for none).
+    property string armed
 
     // win.greeter.qml drives everything; `greeter` is its root object.
 
@@ -21,6 +26,37 @@ Item {
         Motion {
             type: "emphasized"
         }
+    }
+
+    Behavior on driftX {
+        NumberAnimation {
+            duration: 4000
+            easing.type: Easing.InOutSine
+        }
+    }
+
+    Behavior on driftY {
+        NumberAnimation {
+            duration: 4000
+            easing.type: Easing.InOutSine
+        }
+    }
+
+    Timer {
+        interval: 60000
+        repeat: true
+        running: !win.greeter.awake
+        onTriggered: {
+            win.driftX = Math.round((Math.random() - 0.5) * 24);
+            win.driftY = Math.round((Math.random() - 0.5) * 24);
+        }
+    }
+
+    Timer {
+        id: disarm
+
+        interval: 3500
+        onTriggered: win.armed = ""
     }
 
     Connections {
@@ -150,7 +186,8 @@ Item {
             readonly property real pointSize: Math.max(24, win.height * 0.17)
 
             anchors.horizontalCenter: parent.horizontalCenter
-            y: (win.height - height) / 2 * (1 - win.prog) + win.height * 0.1 * win.prog
+            anchors.horizontalCenterOffset: win.driftX * (1 - win.prog)
+            y: ((win.height - height) / 2 + win.driftY) * (1 - win.prog) + win.height * 0.1 * win.prog
             transformOrigin: Item.Top
             scale: 1 - 0.4 * win.prog
             spacing: pointSize * 0.12
@@ -310,6 +347,103 @@ Item {
             font.family: "Google Sans Flex"
             font.pointSize: 11
             opacity: win.prog
+        }
+
+        // Sleep, restart, shut down; restart and shut down need a second click.
+        Row {
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.margins: 48
+            spacing: 10
+            opacity: win.prog
+            visible: opacity > 0 && !win.greeter.preview
+
+            Repeater {
+                model: [
+                    {
+                        key: "suspend",
+                        icon: "bedtime",
+                        label: "Sleep",
+                        confirm: false
+                    },
+                    {
+                        key: "reboot",
+                        icon: "restart_alt",
+                        label: "Restart?",
+                        confirm: true
+                    },
+                    {
+                        key: "poweroff",
+                        icon: "power_settings_new",
+                        label: "Shut down?",
+                        confirm: true
+                    }
+                ]
+
+                Rectangle {
+                    id: powerButton
+
+                    required property var modelData
+                    readonly property bool isArmed: win.armed === modelData.key
+
+                    width: isArmed ? powerLabel.implicitWidth + 64 : 48
+                    height: 48
+                    radius: height / 2
+                    color: isArmed ? win.greeter.errorColour : Qt.alpha(win.greeter.surfaceColour, 0.9)
+
+                    Behavior on width {
+                        Motion {
+                            type: "fastSpatial"
+                        }
+                    }
+
+                    Behavior on color {
+                        ColorAnimation {
+                            duration: 200
+                        }
+                    }
+
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: powerButton.isArmed ? 8 : 0
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: powerButton.modelData.icon
+                            color: powerButton.isArmed ? "black" : win.greeter.textColour
+                            font.family: "Material Symbols Rounded"
+                            font.pixelSize: 22
+                        }
+
+                        Text {
+                            id: powerLabel
+
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: powerButton.isArmed
+                            text: powerButton.modelData.label
+                            color: "black"
+                            font.family: "Google Sans Flex"
+                            font.pointSize: 11
+                            font.weight: Font.DemiBold
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            win.greeter.wake();
+                            if (powerButton.modelData.confirm && !powerButton.isArmed) {
+                                win.armed = powerButton.modelData.key;
+                                disarm.restart();
+                                return;
+                            }
+                            win.armed = "";
+                            Quickshell.execDetached(["systemctl", powerButton.modelData.key]);
+                        }
+                    }
+                }
+            }
         }
     }
 

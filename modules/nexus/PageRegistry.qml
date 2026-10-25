@@ -20,6 +20,12 @@ QtObject {
             description: Tr.tr("Tiling or floating, title bars, gaps, borders"),
             category: "appearance"
         },
+        {
+            label: Tr.tr("Lock screen"),
+            icon: "lock",
+            description: Tr.tr("Always-on clock, what it shows, unlocking"),
+            category: "appearance"
+        },
 
         // Connectivity
         {

@@ -1,7 +1,8 @@
 import QtQuick
 
 // Greeter copy of modules/lock/kairos/RollingDigit.qml without Caelestia dependencies.
-// Same motion (Motion.qml mirrors Caelestia's Anim types).
+// Same motion (Motion.qml mirrors Caelestia's Anim types); the weight follows `boldness` on the
+// font's variable weight axis, so the digits thicken when the screen wakes.
 Item {
     id: root
 
@@ -11,6 +12,7 @@ Item {
     property real boldness
 
     property string shown: digit
+    readonly property int weight: Math.round((300 + 400 * boldness) / 20) * 20
 
     implicitWidth: zeroMetrics.advanceWidth
     implicitHeight: zeroMetrics.tightBoundingRect.height
@@ -20,11 +22,14 @@ Item {
             roll.restart();
     }
 
+    // Measured at the boldest weight so the box stays put while the weight changes.
     TextMetrics {
         id: zeroMetrics
 
         text: "0"
-        font: bold.font
+        font.family: "Rubik"
+        font.pointSize: root.pointSize
+        font.weight: Font.Bold
     }
 
     SequentialAnimation {
@@ -77,29 +82,16 @@ Item {
         height: root.height
 
         Text {
-            id: thin
-
             anchors.horizontalCenter: parent.horizontalCenter
             y: -(zeroMetrics.tightBoundingRect.y - zeroMetrics.boundingRect.y)
             text: root.shown
             color: root.colour
             font.family: "Rubik"
             font.pointSize: root.pointSize
-            font.weight: Font.Light
-            opacity: 1 - root.boldness
-        }
-
-        Text {
-            id: bold
-
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: thin.y
-            text: root.shown
-            color: root.colour
-            font.family: "Rubik"
-            font.pointSize: root.pointSize
-            font.weight: Font.Bold
-            opacity: root.boldness
+            font.weight: root.weight
+            font.variableAxes: ({
+                    "wght": root.weight
+                })
         }
     }
 }
