@@ -9,6 +9,7 @@ import Caelestia.Config
 import Caelestia.I18n
 import qs.components
 import qs.components.filedialog
+import qs.services
 
 Item {
     id: root
@@ -16,48 +17,77 @@ Item {
     required property ScreenState screenState
     required property FileDialog facePicker
 
-    readonly property var dashboardTabs: {
-        const allTabs = [
-            {
+    property bool customizing
+
+    // Everything the dashboard can show. DashboardLayout decides which of these appear and in what order;
+    // the old config flags can still switch off the four tabs that have one.
+    readonly property var tabDefs: ({
+            calendar: {
+                component: calendarComponent,
+                iconName: "calendar_month",
+                text: Tr.tr("Calendar"),
+                enabled: true
+            },
+            todo: {
+                component: todoComponent,
+                iconName: "checklist",
+                text: Tr.tr("To-do"),
+                enabled: true
+            },
+            home: {
+                component: homeComponent,
+                iconName: "home",
+                text: Tr.tr("Home"),
+                enabled: true
+            },
+            dashboard: {
                 component: dashComponent,
                 iconName: "dashboard",
                 text: Tr.tr("Dashboard"),
                 enabled: Config.dashboard.showDashboard
             },
-            {
+            media: {
                 component: mediaComponent,
                 iconName: "queue_music",
                 text: Tr.tr("Media"),
                 enabled: Config.dashboard.showMedia
             },
-            {
+            performance: {
                 component: performanceComponent,
                 iconName: "speed",
                 text: Tr.tr("Performance"),
                 enabled: Config.dashboard.showPerformance
             },
-            {
+            weather: {
                 component: weatherComponent,
                 iconName: "cloud",
                 text: Tr.tr("Weather"),
                 enabled: Config.dashboard.showWeather
-            },
-            {
-                component: homeComponent,
-                iconName: "home",
-                text: Tr.tr("Home"),
-                // Always on: the show* flags live in the C++ config plugin, which this fork leaves untouched.
-                enabled: true
             }
-        ];
-        return allTabs.filter(tab => tab.enabled);
-    }
+        })
+    readonly property var dashboardTabs: DashboardLayout.visibleTabs.map(id => tabDefs[id]).filter(tab => tab && tab.enabled)
 
-    readonly property real nonAnimWidth: view.implicitWidth + viewWrapper.anchors.margins * 2
-    readonly property real nonAnimHeight: tabs.implicitHeight + tabs.anchors.topMargin + view.implicitHeight + viewWrapper.anchors.margins * 2
+    // While customising, the sheet sets the height; the width never shrinks below the current tab's.
+    readonly property real nonAnimWidth: (customizing ? Math.max(view.implicitWidth, sheet.implicitWidth) : view.implicitWidth) + viewWrapper.anchors.margins * 2
+    readonly property real nonAnimHeight: tabs.implicitHeight + tabs.anchors.topMargin + (customizing ? sheet.implicitHeight : view.implicitHeight) + viewWrapper.anchors.margins * 2
 
     implicitWidth: nonAnimWidth
     implicitHeight: nonAnimHeight
+
+    // Keep the selection valid when tabs are switched off.
+    onDashboardTabsChanged: {
+        if (screenState.dashboardTab >= dashboardTabs.length)
+            screenState.dashboardTab = Math.max(0, dashboardTabs.length - 1);
+    }
+
+    // Picking a tab leaves the customise sheet.
+    Connections {
+        function onDashboardTabChanged(): void {
+            root.customizing = false;
+        }
+
+        target: root.screenState
+    }
 
     Tabs {
         id: tabs
@@ -71,6 +101,7 @@ Item {
         nonAnimWidth: root.nonAnimWidth - anchors.margins * 2
         screenState: root.screenState
         tabs: root.dashboardTabs
+        onCustomizeRequested: root.customizing = !root.customizing
     }
 
     ClippingRectangle {
@@ -96,6 +127,8 @@ Item {
 
             anchors.fill: parent
 
+            opacity: root.customizing ? 0 : 1
+            enabled: !root.customizing
             flickableDirection: Flickable.HorizontalFlick
 
             implicitWidth: currentItem?.implicitWidth ?? 0
@@ -161,6 +194,22 @@ Item {
             }
 
             Component {
+                id: calendarComponent
+
+                CalendarTab {
+                    screenState: root.screenState
+                }
+            }
+
+            Component {
+                id: todoComponent
+
+                TodoTab {
+                    screenState: root.screenState
+                }
+            }
+
+            Component {
                 id: dashComponent
 
                 Dash {
@@ -197,8 +246,32 @@ Item {
                 }
             }
 
+            Behavior on opacity {
+                Anim {
+                    type: Anim.DefaultEffects
+                }
+            }
+
             Behavior on contentX {
                 Anim {}
+            }
+        }
+
+        CustomizeSheet {
+            id: sheet
+
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+
+            opacity: root.customizing ? 1 : 0
+            visible: opacity > 0
+            onDone: root.customizing = false
+
+            Behavior on opacity {
+                Anim {
+                    type: Anim.DefaultEffects
+                }
             }
         }
     }

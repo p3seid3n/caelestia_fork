@@ -17,6 +17,10 @@ Item {
     required property var tabs
 
     readonly property alias count: bar.count
+    // Width left for the tabs once the customise button has its share.
+    readonly property real stripWidth: nonAnimWidth - customize.width - Tokens.spacing.small
+
+    signal customizeRequested
 
     implicitHeight: bar.implicitHeight + bar.anchors.topMargin + indicator.implicitHeight + indicator.anchors.topMargin + separator.implicitHeight
 
@@ -24,7 +28,8 @@ Item {
         id: bar
 
         anchors.left: parent.left
-        anchors.right: parent.right
+        anchors.right: customize.left
+        anchors.rightMargin: Tokens.spacing.small
         anchors.top: parent.top
         anchors.topMargin: Tokens.sizes.dashboard.tabIndicatorSpacing
 
@@ -55,6 +60,19 @@ Item {
         }
     }
 
+    IconButton {
+        id: customize
+
+        anchors.right: parent.right
+        anchors.verticalCenter: bar.verticalCenter
+
+        type: IconButton.Text
+        isRound: true
+        icon: "tune"
+        inactiveOnColour: Colours.palette.m3onSurfaceVariant
+        onClicked: root.customizeRequested()
+    }
+
     Item {
         id: indicator
 
@@ -65,14 +83,14 @@ Item {
             const tab = bar.currentItem;
             if (tab)
                 return tab.implicitWidth;
-            const width = (root.nonAnimWidth - bar.spacing * (bar.count - 1)) / bar.count;
+            const width = (root.stripWidth - bar.spacing * (bar.count - 1)) / bar.count;
             return width;
         }
         implicitHeight: 3
 
         x: {
             const tab = bar.currentItem;
-            const width = (root.nonAnimWidth - bar.spacing * (bar.count - 1)) / bar.count;
+            const width = (root.stripWidth - bar.spacing * (bar.count - 1)) / bar.count;
             const tabWidth = tab?.implicitWidth ?? width;
             return width * bar.currentIndex + (width - tabWidth) / 2;
         }

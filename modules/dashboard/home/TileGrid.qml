@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Shapes
 import Quickshell
 import Caelestia.Config
 import qs.components
@@ -14,6 +15,8 @@ Item {
     id: root
 
     property bool editing
+    // Tile being dragged right now ("" when none); the ghost shows where it will land.
+    property string dragId
 
     readonly property int columns: HomeAssistant.columns
     readonly property real gap: Tokens.spacing.small
@@ -21,6 +24,7 @@ Item {
     readonly property var packed: pack(HomeAssistant.tiles)
 
     signal expand(entityId: string, from: rect)
+    signal editRequested
 
     function pack(tiles: var): var {
         const taken = [];
@@ -73,6 +77,37 @@ Item {
         Anim {}
     }
 
+    // Landing spot of the dragged tile.
+    StyledRect {
+        readonly property var p: root.packed.pos[root.dragId] ?? null
+
+        x: p ? p.col * (root.cell + root.gap) : 0
+        y: p ? p.row * (root.cell + root.gap) : 0
+        width: p ? root.span(p.w) : 0
+        height: p ? root.span(p.h) : 0
+        visible: p !== null
+        radius: Tokens.rounding.extraLarge
+        color: Qt.alpha(Colours.palette.m3primary, 0.12)
+        border.width: 2
+        border.color: Qt.alpha(Colours.palette.m3primary, 0.45)
+
+        Behavior on x {
+            Anim {}
+        }
+
+        Behavior on y {
+            Anim {}
+        }
+
+        Behavior on width {
+            Anim {}
+        }
+
+        Behavior on height {
+            Anim {}
+        }
+    }
+
     Repeater {
         // Sorted ids: the model only changes when tiles are added or removed, so
         // delegates survive reordering and can animate to their new place.
@@ -94,6 +129,13 @@ Item {
 
             property bool dragging
             property point dragPos
+
+            onDraggingChanged: {
+                if (dragging)
+                    root.dragId = modelData;
+                else if (root.dragId === modelData)
+                    root.dragId = "";
+            }
 
             x: dragging ? dragPos.x : p.col * (root.cell + root.gap)
             y: dragging ? dragPos.y : p.row * (root.cell + root.gap)
@@ -128,6 +170,7 @@ Item {
                 editing: root.editing
                 scale: slot.dragging ? 1.05 : 1
 
+                onEditRequested: root.editRequested()
                 onExpand: {
                     const r = slot.mapToItem(root, 0, 0, slot.width, slot.height);
                     root.expand(slot.modelData, Qt.rect(r.x, r.y, r.width, r.height));
@@ -223,10 +266,12 @@ Item {
             StyledRect {
                 x: -width / 3
                 y: -height / 3
-                implicitWidth: 24
-                implicitHeight: 24
+                implicitWidth: 26
+                implicitHeight: 26
                 radius: Tokens.rounding.full
                 color: Colours.palette.m3surfaceContainerHighest
+                border.width: 1
+                border.color: Colours.palette.m3outlineVariant
                 visible: scale > 0
                 scale: root.editing && !slot.dragging ? 1 : 0
 
@@ -248,15 +293,15 @@ Item {
                 }
             }
 
-            // Resize handle: drag the corner, the size snaps to the grid.
-            StyledRect {
+            // Resize handle: a corner arc like iOS. Drag it, the size snaps to the grid.
+            Item {
+                id: handle
+
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.margins: 4
-                implicitWidth: 22
-                implicitHeight: 22
-                radius: Tokens.rounding.full
-                color: Colours.palette.m3primary
+                anchors.margins: 8
+                implicitWidth: 20
+                implicitHeight: 20
                 visible: scale > 0
                 scale: root.editing && !slot.dragging ? 1 : 0
 
@@ -266,12 +311,26 @@ Item {
                     }
                 }
 
-                MaterialIcon {
-                    anchors.centerIn: parent
-                    text: "open_in_full"
-                    rotation: 90
-                    color: Colours.palette.m3onPrimary
-                    fontStyle: Tokens.font.icon.small
+                Shape {
+                    anchors.fill: parent
+                    preferredRendererType: Shape.CurveRenderer
+
+                    ShapePath {
+                        startX: handle.width - 2
+                        startY: 2
+                        strokeWidth: 3
+                        strokeColor: Colours.palette.m3onSurface
+                        fillColor: "transparent"
+                        capStyle: ShapePath.RoundCap
+
+                        PathArc {
+                            x: 2
+                            y: handle.height - 2
+                            radiusX: handle.width - 4
+                            radiusY: handle.height - 4
+                            direction: PathArc.Clockwise
+                        }
+                    }
                 }
 
                 MouseArea {
@@ -280,7 +339,7 @@ Item {
                     property real startH
 
                     anchors.fill: parent
-                    anchors.margins: -6
+                    anchors.margins: -8
                     preventStealing: true
                     cursorShape: Qt.SizeFDiagCursor
 

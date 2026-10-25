@@ -45,6 +45,30 @@ Singleton {
             input_button: "press"
         })
 
+    // Which gallery category an entity type belongs to. Anything not listed ends up in "other".
+    readonly property var categoryByDomain: ({
+            light: "light",
+            switch: "switch",
+            input_boolean: "switch",
+            climate: "climate",
+            fan: "climate",
+            humidifier: "climate",
+            cover: "cover",
+            valve: "cover",
+            media_player: "media",
+            scene: "scene",
+            script: "scene",
+            automation: "automation",
+            button: "automation",
+            input_button: "automation",
+            sensor: "sensor",
+            binary_sensor: "sensor",
+            person: "person",
+            lock: "security",
+            alarm_control_panel: "security",
+            siren: "security"
+        })
+
     // Values handed to the keyring helper processes (kept out of the command line).
     property string pendingValue
 
@@ -73,6 +97,64 @@ Singleton {
 
     function isSelected(entityId: string): bool {
         return selected.includes(entityId);
+    }
+
+    // Gallery category of an entity. Doors, locks and alarms are kept in their own one because the gallery hides it by default.
+    function categoryOf(entityId: string): string {
+        if (isSensitive(entityId))
+            return "security";
+        return categoryByDomain[domainOf(entityId)] ?? "other";
+    }
+
+    // Material Symbols icon for an entity; `on` picks the open/closed style where there is one.
+    function iconOf(entityId: string, on: bool): string {
+        const dc = byId[entityId]?.attributes?.device_class ?? "";
+        switch (domainOf(entityId)) {
+        case "light":
+            return "lightbulb";
+        case "switch":
+        case "input_boolean":
+            return "toggle_on";
+        case "fan":
+            return "mode_fan";
+        case "climate":
+            return "thermostat";
+        case "media_player":
+            return "speaker";
+        case "scene":
+            return "palette";
+        case "script":
+            return "play_arrow";
+        case "automation":
+            return "smart_toy";
+        case "button":
+        case "input_button":
+            return "radio_button_checked";
+        case "lock":
+            return on ? "lock_open" : "lock";
+        case "cover":
+            return dc === "garage" ? "garage" : dc === "door" || dc === "gate" ? "door_front" : "blinds";
+        case "person":
+            return "person";
+        case "binary_sensor":
+            if (dc === "door" || dc === "garage_door" || dc === "window")
+                return dc === "window" ? "window" : "door_front";
+            if (dc === "motion" || dc === "occupancy" || dc === "presence")
+                return on ? "directions_run" : "accessibility_new";
+            return "sensors";
+        case "sensor":
+            if (dc === "temperature")
+                return "thermostat";
+            if (dc === "humidity")
+                return "humidity_percentage";
+            if (dc === "battery")
+                return "battery_full";
+            if (dc === "power" || dc === "energy")
+                return "bolt";
+            return "sensors";
+        default:
+            return "home";
+        }
     }
 
     function setSelected(entityId: string, on: bool): void {

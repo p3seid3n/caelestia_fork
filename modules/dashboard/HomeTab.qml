@@ -10,27 +10,30 @@ import qs.components.controls
 import qs.services
 
 // Dashboard "Home" tab: Home Assistant.
-// Setup form -> tiles of the chosen devices -> editor (pencil button) to choose them.
+// Setup form -> tiles of the chosen devices. Edit mode works like the iOS Control Center:
+// the tiles wiggle and can be dragged, resized (corner arc) and removed (minus badge),
+// "+" and "Add a device" slide up the device gallery, "Done" leaves edit mode.
+// Holding a tile starts edit mode too.
 Item {
     id: root
 
     required property ScreenState screenState
     property bool editing
-    property bool picking // device list open while editing
+    property bool picking // device gallery open (only while editing)
+
+    // The gallery needs room, however few tiles there are.
+    implicitWidth: 840
+    implicitHeight: Math.max(layout.implicitHeight, detail.open ? tiles.y + 400 : 0, picking ? 520 : 0) + Tokens.padding.large * 2
 
     onEditingChanged: {
         picking = false;
         detail.open = false;
     }
-
-    implicitWidth: 840
-    implicitHeight: Math.max(layout.implicitHeight, detail.open ? tiles.y + 400 : 0) + Tokens.padding.large * 2
+    Component.onCompleted: HomeAssistant.refresh()
 
     Behavior on implicitHeight {
         Anim {}
     }
-
-    Component.onCompleted: HomeAssistant.refresh()
 
     // Ask the drawer window for keyboard focus while there is something to type into.
     // Released automatically when this tab is unloaded.
@@ -55,6 +58,14 @@ Item {
             Layout.fillWidth: true
             spacing: Tokens.spacing.small
 
+            IconButton {
+                visible: HomeAssistant.connected && root.editing
+                type: IconButton.Tonal
+                isRound: true
+                icon: "add"
+                onClicked: root.picking = true
+            }
+
             StyledText {
                 Layout.fillWidth: true
                 text: Tr.tr("Home")
@@ -75,11 +86,19 @@ Item {
             }
 
             IconButton {
-                visible: HomeAssistant.connected
-                type: root.editing ? IconButton.Filled : IconButton.Tonal
+                visible: HomeAssistant.connected && !root.editing
+                type: IconButton.Tonal
                 isRound: true
-                icon: root.editing ? "check" : "edit"
-                onClicked: root.editing = !root.editing
+                icon: "edit"
+                onClicked: root.editing = true
+            }
+
+            TextButton {
+                visible: HomeAssistant.connected && root.editing
+                type: TextButton.Filled
+                horizontalPadding: Tokens.padding.extraLarge
+                text: Tr.tr("Done")
+                onClicked: root.editing = false
             }
         }
 
@@ -146,30 +165,52 @@ Item {
             visible: HomeAssistant.connected
             editing: root.editing
             onExpand: (id, from) => detail.show(id, from)
+            onEditRequested: root.editing = true
         }
 
-        StyledText {
+        // Nothing chosen yet
+        ColumnLayout {
             Layout.fillWidth: true
+            Layout.topMargin: Tokens.padding.large
             visible: HomeAssistant.connected && !root.editing && HomeAssistant.selected.length === 0
-            wrapMode: Text.WordWrap
-            text: Tr.tr("No devices yet. Tap the pencil to choose which ones appear here.")
-            font: Tokens.font.body.small
-            color: Colours.palette.m3onSurfaceVariant
+            spacing: Tokens.spacing.small
+
+            MaterialIcon {
+                Layout.alignment: Qt.AlignHCenter
+                text: "home"
+                color: Colours.palette.m3onSurfaceVariant
+                fontStyle: Tokens.font.icon.extraLarge
+                opacity: 0.6
+            }
+
+            StyledText {
+                Layout.alignment: Qt.AlignHCenter
+                text: Tr.tr("No devices yet")
+                font: Tokens.font.body.medium
+                color: Colours.palette.m3onSurfaceVariant
+            }
+
+            TextButton {
+                Layout.alignment: Qt.AlignHCenter
+                type: TextButton.Filled
+                horizontalPadding: Tokens.padding.extraLarge
+                text: Tr.tr("Add devices")
+                onClicked: {
+                    root.editing = true;
+                    root.picking = true;
+                }
+            }
         }
 
-        // Edit mode: add / remove devices
-        TextButton {
+        // Edit mode: opens the gallery
+        IconTextButton {
             Layout.alignment: Qt.AlignHCenter
             visible: HomeAssistant.connected && root.editing
-            type: root.picking ? TextButton.Filled : TextButton.Tonal
+            type: IconTextButton.Tonal
             horizontalPadding: Tokens.padding.extraLarge
-            text: root.picking ? Tr.tr("Done adding") : Tr.tr("Add devices")
-            onClicked: root.picking = !root.picking
-        }
-
-        EntityEditor {
-            Layout.fillWidth: true
-            visible: HomeAssistant.connected && root.editing && root.picking
+            icon: "add"
+            text: Tr.tr("Add a device")
+            onClicked: root.picking = true
         }
     }
 
@@ -184,5 +225,92 @@ Item {
         z: 10
 
         // `from` arrives in grid coordinates, which is what this item uses too.
+    }
+
+    // Device gallery: slides up over the tab, like the iOS "Add a Control" sheet.
+    Item {
+        id: sheet
+
+        property real prog: root.picking ? 1 : 0
+
+        anchors.fill: parent
+        z: 20
+        visible: prog > 0
+
+        Behavior on prog {
+            Anim {
+                type: Anim.DefaultSpatial
+            }
+        }
+
+        // Scrim: tap outside to close.
+        StyledRect {
+            anchors.fill: parent
+            radius: Tokens.rounding.large
+            color: Colours.palette.m3scrim
+            opacity: 0.35 * sheet.prog
+
+            MouseArea {
+                anchors.fill: parent
+                enabled: root.picking
+                onClicked: root.picking = false
+            }
+        }
+
+        StyledRect {
+            x: 0
+            y: sheet.height - height * sheet.prog
+            width: sheet.width
+            height: sheet.height - Tokens.padding.extraLarge
+            topLeftRadius: Tokens.rounding.extraLarge
+            topRightRadius: Tokens.rounding.extraLarge
+            color: Colours.palette.m3surfaceContainerHigh
+
+            // Keeps taps on the sheet itself from reaching the scrim.
+            MouseArea {
+                anchors.fill: parent
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Tokens.padding.large
+                spacing: Tokens.spacing.small
+
+                StyledRect {
+                    Layout.alignment: Qt.AlignHCenter
+                    implicitWidth: 36
+                    implicitHeight: 4
+                    radius: Tokens.rounding.full
+                    color: Colours.palette.m3outlineVariant
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Tokens.spacing.small
+
+                    StyledText {
+                        Layout.fillWidth: true
+                        text: Tr.tr("Add a device")
+                        font: Tokens.font.body.builders.large.size(22).weight(Font.DemiBold).build()
+                        color: Colours.palette.m3onSurface
+                    }
+
+                    IconButton {
+                        type: IconButton.Tonal
+                        isRound: true
+                        icon: "close"
+                        onClicked: root.picking = false
+                    }
+                }
+
+                Loader {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    active: root.picking || sheet.prog > 0
+
+                    sourceComponent: DeviceGallery {}
+                }
+            }
+        }
     }
 }

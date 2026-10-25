@@ -22,6 +22,7 @@ StyledRect {
     property bool editing
 
     signal expand
+    signal editRequested
 
     readonly property var entity: HomeAssistant.byId[entityId] ?? null
     readonly property var attrs: entity?.attributes ?? ({})
@@ -129,55 +130,7 @@ StyledRect {
         HomeAssistant.activate(entityId);
     }
 
-    readonly property string iconName: {
-        const dc = attrs.device_class ?? "";
-        switch (domain) {
-        case "light":
-            return "lightbulb";
-        case "switch":
-        case "input_boolean":
-            return "toggle_on";
-        case "fan":
-            return "mode_fan";
-        case "climate":
-            return "thermostat";
-        case "media_player":
-            return "speaker";
-        case "scene":
-            return "palette";
-        case "script":
-            return "play_arrow";
-        case "automation":
-            return "smart_toy";
-        case "button":
-        case "input_button":
-            return "radio_button_checked";
-        case "lock":
-            return on ? "lock_open" : "lock";
-        case "cover":
-            return dc === "garage" ? "garage" : dc === "door" || dc === "gate" ? "door_front" : "blinds";
-        case "person":
-            return "person";
-        case "binary_sensor":
-            if (dc === "door" || dc === "garage_door" || dc === "window")
-                return dc === "window" ? "window" : "door_front";
-            if (dc === "motion" || dc === "occupancy" || dc === "presence")
-                return on ? "directions_run" : "accessibility_new";
-            return "sensors";
-        case "sensor":
-            if (dc === "temperature")
-                return "thermostat";
-            if (dc === "humidity")
-                return "humidity_percentage";
-            if (dc === "battery")
-                return "battery_full";
-            if (dc === "power" || dc === "energy")
-                return "bolt";
-            return "sensors";
-        default:
-            return "home";
-        }
-    }
+    readonly property string iconName: HomeAssistant.iconOf(entityId, on)
 
     readonly property string stateText: {
         if (confirming)
@@ -218,7 +171,7 @@ StyledRect {
         return Colours.palette.m3primary;
     }
 
-    radius: Tokens.rounding.large
+    radius: Tokens.rounding.extraLarge
     color: confirming ? Colours.palette.m3errorContainer : on ? Colours.palette.m3primaryContainer : Colours.tPalette.m3surfaceContainerHigh
     clip: true
 
@@ -240,6 +193,7 @@ StyledRect {
         radius: root.radius
         color: root.on ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurface
         onClicked: root.expand()
+        onPressAndHold: root.editRequested()
     }
 
     // --- Vertical slider tile ---------------------------------------------------
