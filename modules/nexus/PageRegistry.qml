@@ -22,13 +22,12 @@ QtObject {
         },
 
         // Connectivity
-        // TODO
-        // {
-        //     label: Tr.tr("Display"),
-        //     icon: "monitor",
-        //     description: Tr.tr("Output configuration"),
-        //     category: "connectivity"
-        // },
+        {
+            label: Tr.tr("Display"),
+            icon: "monitor",
+            description: Tr.tr("Resolution, refresh rate, scale, rotation"),
+            category: "connectivity"
+        },
         {
             label: Tr.tr("Network"),
             icon: "wifi",
@@ -59,7 +58,7 @@ QtObject {
         {
             label: Tr.tr("Plugins"),
             icon: "extension",
-            description: Tr.tr("Manage plugins"),
+            description: Tr.tr("Hyprland plugins, title bars"),
             category: "system"
         },
 

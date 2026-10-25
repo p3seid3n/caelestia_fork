@@ -48,7 +48,7 @@ Singleton {
     // so removing it in the settings sticks.
     property bool toggleOffered
     // Whether the hyprbars plugin is loaded in Hyprland (for the settings page).
-    property bool hasTitleBarPlugin
+    readonly property bool hasTitleBarPlugin: HyprPlugins.hyprbarsLoaded
     // hyprlang only: windows floated by floating mode, by address.
     property var floated: []
 
@@ -273,10 +273,20 @@ Singleton {
                 root.applyFloating();
             else
                 root.applyOptions();
-            pluginCheck.running = true;
+            HyprPlugins.refresh();
         }
 
         target: Hypr
+    }
+
+    // Title bars as soon as hyprbars is installed and loaded.
+    Connections {
+        function onHyprbarsLoadedChanged(): void {
+            if (HyprPlugins.hyprbarsLoaded)
+                root.applyTitleBars();
+        }
+
+        target: HyprPlugins
     }
 
     // hyprlang: new windows float while floating mode is on.
@@ -375,24 +385,8 @@ Singleton {
                 root.applyFloating();
             else
                 root.applyOptions();
-            pluginCheck.running = true;
+            HyprPlugins.refresh();
             root.offerQuickToggle();
-        }
-    }
-
-    Process {
-        id: pluginCheck
-
-        command: ["hyprctl", "-j", "plugin", "list"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                try {
-                    const list = JSON.parse(text);
-                    root.hasTitleBarPlugin = Array.isArray(list) && list.some(p => String(p.name ?? "").toLowerCase().includes("hyprbars"));
-                } catch (error) {
-                    root.hasTitleBarPlugin = /hyprbars/i.test(text);
-                }
-            }
         }
     }
 

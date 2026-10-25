@@ -44,11 +44,32 @@ PageBase {
         }
 
         NavRow {
-            last: true
             icon: "construction"
             text: Tr.tr("Utilities")
             subtext: Config.utilities.enabled ? Tr.trCtx("Enabled", "panel status") : Tr.trCtx("Disabled", "panel status")
             onClicked: root.nState.openSubPage(5)
+        }
+
+        NavRow {
+            icon: "tune"
+            text: Tr.tr("On-screen display")
+            subtext: Config.osd.enabled ? Tr.trCtx("Enabled", "panel status") : Tr.trCtx("Disabled", "panel status")
+            onClicked: root.nState.openSubPage(11)
+        }
+
+        NavRow {
+            icon: "power_settings_new"
+            text: Tr.tr("Session menu")
+            subtext: Config.session.enabled ? Tr.trCtx("Enabled", "panel status") : Tr.trCtx("Disabled", "panel status")
+            onClicked: root.nState.openSubPage(12)
+        }
+
+        NavRow {
+            last: true
+            icon: "wallpaper"
+            text: Tr.tr("Desktop")
+            subtext: Tr.tr("Desktop clock, audio visualiser")
+            onClicked: root.nState.openSubPage(13)
         }
     }
 }

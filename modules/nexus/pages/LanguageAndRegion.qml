@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Caelestia
 import Caelestia.Config
 import Caelestia.I18n
 import qs.components
@@ -10,6 +11,9 @@ import qs.modules.nexus.common
 
 PageBase {
     id: root
+
+    property string placeQuery
+    property var placeResults: []
 
     // Temperature units (there must be one for each value of the TemperatureUnit enum)
     readonly property list<MenuItem> tempItems: [
@@ -58,6 +62,25 @@ PageBase {
             value: ClockFormat.TwentyFourHour
         }
     ]
+
+    // Places for the weather location (Open-Meteo geocoding, as the weather service uses).
+    function searchPlace(query: string): void {
+        const q = query.trim();
+        if (q.length < 2) {
+            placeResults = [];
+            return;
+        }
+        const lang = Qt.locale().name.split("_")[0] || "en";
+        Requests.get(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=${lang}&format=json`, text => {
+            if (q !== placeQuery.trim())
+                return;
+            try {
+                placeResults = JSON.parse(text).results ?? [];
+            } catch (error) {
+                placeResults = [];
+            }
+        });
+    }
 
     title: Tr.tr("Language & region")
 
@@ -112,43 +135,55 @@ PageBase {
             text: Tr.tr("Weather")
         }
 
-        // Placeholder until the map-based location picker lands
-        ConnectedRect {
-            Layout.fillWidth: true
+        // Location: search a place, or let the shell find it from the IP address.
+        TextFieldRow {
+            id: placeField
+
             first: true
-            last: true
-            implicitHeight: comingSoon.implicitHeight + Tokens.padding.extraLarge * 2
+            label: Tr.tr("Location")
+            subtext: GlobalConfig.services.weatherLocation ? Tr.tr("Weather for %1").arg(Weather.city || GlobalConfig.services.weatherLocation) : Tr.tr("Found automatically (%1)").arg(Weather.city || Tr.tr("locating..."))
+            placeholderText: Tr.tr("Search a city")
+            onValueEdited: value => {
+                root.placeQuery = value;
+                placeTimer.restart();
+            }
+        }
 
-            ColumnLayout {
-                id: comingSoon
+        Repeater {
+            model: root.placeResults
 
-                anchors.centerIn: parent
-                width: parent.width - Tokens.padding.largeIncreased * 2
-                spacing: Tokens.padding.extraSmall
+            RowButton {
+                required property var modelData
 
-                MaterialIcon {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: "map"
-                    color: Colours.palette.m3outlineVariant
-                    fontStyle: Tokens.font.icon.extraLarge
-                }
-
-                StyledText {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: Tr.tr("Location picker coming soon")
-                    color: Colours.palette.m3outlineVariant
-                    font: Tokens.font.title.small
-                }
-
-                StyledText {
-                    Layout.fillWidth: true
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                    text: Tr.tr("Choose your weather location on a map in a future update")
-                    color: Colours.palette.m3outlineVariant
-                    font: Tokens.font.body.small
+                icon: "location_on"
+                text: modelData.name
+                subtext: [modelData.admin1, modelData.country].filter(x => x).join(", ")
+                onClicked: {
+                    GlobalConfig.services.weatherLocation = `${modelData.latitude},${modelData.longitude}`;
+                    root.placeResults = [];
+                    placeField.field.text = "";
+                    Weather.reload();
                 }
             }
+        }
+
+        RowButton {
+            last: true
+            icon: "my_location"
+            text: Tr.tr("Find my location automatically")
+            subtext: Tr.tr("From your internet connection, refreshed every 15 minutes")
+            disabled: !GlobalConfig.services.weatherLocation
+            onClicked: {
+                GlobalConfig.services.weatherLocation = "";
+                Weather.reload();
+            }
+        }
+
+        Timer {
+            id: placeTimer
+
+            interval: 350
+            onTriggered: root.searchPlace(root.placeQuery)
         }
 
         // Units
