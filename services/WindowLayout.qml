@@ -4,6 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
+import Caelestia
 import Caelestia.Config
 import Caelestia.I18n
 import qs.utils
