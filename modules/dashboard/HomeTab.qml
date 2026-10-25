@@ -20,6 +20,8 @@ Item {
     required property ScreenState screenState
     property bool editing
     property bool picking // device gallery open (only while editing)
+    // Read by Content.qml: keyboard focus while there is something to type into.
+    readonly property bool wantsInput: !HomeAssistant.connected || editing
 
     // The gallery needs room, however few tiles there are.
     implicitWidth: 840
@@ -33,15 +35,6 @@ Item {
 
     Behavior on implicitHeight {
         Anim {}
-    }
-
-    // Ask the drawer window for keyboard focus while there is something to type into.
-    // Released automatically when this tab is unloaded.
-    Binding {
-        target: root.screenState
-        property: "dashboardInput"
-        value: !HomeAssistant.connected || root.editing
-        restoreMode: Binding.RestoreValue
     }
 
     ColumnLayout {

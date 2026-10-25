@@ -16,6 +16,8 @@ Item {
     id: root
 
     required property ScreenState screenState
+    // Read by Content.qml: the text field needs keyboard focus from the drawer window.
+    readonly property bool wantsInput: true
 
     // Task ids; "#completed" is the label between the two groups. The model holds plain
     // strings so the list keeps its scroll position and animates when a task changes group.
@@ -35,14 +37,6 @@ Item {
     implicitHeight: 480
 
     Component.onCompleted: Qt.callLater(() => taskField.forceActiveFocus())
-
-    // The text field needs keyboard focus from the drawer window.
-    Binding {
-        target: root.screenState
-        property: "dashboardInput"
-        value: true
-        restoreMode: Binding.RestoreValue
-    }
 
     ColumnLayout {
         anchors.fill: parent

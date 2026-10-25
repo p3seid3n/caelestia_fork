@@ -110,6 +110,15 @@ Item {
         onCustomizeRequested: root.customizing = !root.customizing
     }
 
+    // The only place that sets dashboardInput: the tab on screen decides (`wantsInput` on its root).
+    // Tabs used to set it themselves with RestoreValue Bindings, but a tab unloading after the next
+    // one had loaded restored its stale value and took the keyboard away again.
+    Binding {
+        target: root.screenState
+        property: "dashboardInput"
+        value: (view.currentItem as Loader)?.item?.wantsInput ?? false
+    }
+
     ClippingRectangle {
         id: viewWrapper
 

@@ -21,6 +21,8 @@ CustomMouseArea {
 
     // The day whose agenda is shown on the right.
     property date selected: new Date()
+    // Read by Content.qml: keyboard focus while a sheet with text fields is open.
+    readonly property bool wantsInput: eventSheet.open || sourcesSheet.open
 
     readonly property int year: screenState.dashboardDate.getFullYear()
     readonly property int month: screenState.dashboardDate.getMonth()
@@ -70,13 +72,6 @@ CustomMouseArea {
     acceptedButtons: Qt.MiddleButton
     onClicked: goToday()
 
-    // Ask the drawer window for keyboard focus while a sheet with text fields is open.
-    Binding {
-        target: root.screenState
-        property: "dashboardInput"
-        value: eventSheet.open || sourcesSheet.open
-        restoreMode: Binding.RestoreValue
-    }
 
     RowLayout {
         anchors.fill: parent
