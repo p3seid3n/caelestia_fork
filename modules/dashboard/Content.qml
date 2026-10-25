@@ -20,7 +20,7 @@ Item {
     property bool customizing
 
     // Everything the dashboard can show. DashboardLayout decides which of these appear and in what order;
-    // the old config flags can still switch off the four tabs that have one.
+    // the old config flags can still switch off the tabs that have one.
     readonly property var tabDefs: ({
             calendar: {
                 component: calendarComponent,
@@ -41,9 +41,15 @@ Item {
                 enabled: true
             },
             dashboard: {
-                component: dashComponent,
+                component: boardComponent,
                 iconName: "dashboard",
                 text: Tr.tr("Dashboard"),
+                enabled: Config.dashboard.showDashboard
+            },
+            classic: {
+                component: dashComponent,
+                iconName: "dashboard_customize",
+                text: Tr.tr("Classic dashboard"),
                 enabled: Config.dashboard.showDashboard
             },
             media: {
@@ -207,6 +213,12 @@ Item {
                 TodoTab {
                     screenState: root.screenState
                 }
+            }
+
+            Component {
+                id: boardComponent
+
+                DashboardBoard {}
             }
 
             Component {

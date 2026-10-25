@@ -16,9 +16,9 @@ Singleton {
     id: root
 
     // Every tab the dashboard knows, in its default order.
-    readonly property var allTabs: ["calendar", "todo", "home", "dashboard", "media", "performance", "weather"]
+    readonly property var allTabs: ["calendar", "todo", "home", "dashboard", "classic", "media", "performance", "weather"]
     // Tabs that are on until the user changes it.
-    readonly property var defaultOn: ["calendar", "todo", "home"]
+    readonly property var defaultOn: ["calendar", "todo", "home", "dashboard"]
 
     // Display order of all tabs (also the hidden ones) and the ones that are switched on.
     property var order: allTabs.slice()
@@ -41,6 +41,10 @@ Singleton {
             dashboard: {
                 name: Tr.tr("Dashboard"),
                 icon: "dashboard"
+            },
+            classic: {
+                name: Tr.tr("Classic dashboard"),
+                icon: "dashboard_customize"
             },
             media: {
                 name: Tr.tr("Media"),
