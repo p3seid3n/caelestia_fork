@@ -39,6 +39,14 @@ QtObject {
                 }
             }
         },
+        Component {
+            // Windows
+            StackPage {
+                Component {
+                    WindowsPage {}
+                }
+            }
+        },
 
         // Connectivity
         Component {

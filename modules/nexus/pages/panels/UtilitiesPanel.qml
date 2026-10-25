@@ -119,6 +119,14 @@ PageBase {
         }
 
         ToggleRow {
+            text: Tr.tr("Floating windows")
+            subtext: Tr.tr("Switch between tiling and floating windows")
+            disabled: !Config.utilities.cards.quickToggles
+            checked: root.isToggleOn("floating")
+            onToggled: root.setToggleOn("floating", checked)
+        }
+
+        ToggleRow {
             text: Tr.tr("Game mode")
             subtext: Tr.tr("Toggle game mode")
             disabled: !Config.utilities.cards.quickToggles

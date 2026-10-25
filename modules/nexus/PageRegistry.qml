@@ -14,6 +14,12 @@ QtObject {
             description: Tr.tr("Wallpaper, fonts, colours"),
             category: "appearance"
         },
+        {
+            label: Tr.tr("Windows"),
+            icon: "select_window",
+            description: Tr.tr("Tiling or floating, title bars, gaps, borders"),
+            category: "appearance"
+        },
 
         // Connectivity
         // TODO

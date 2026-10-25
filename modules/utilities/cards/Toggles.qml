@@ -132,6 +132,14 @@ StyledRect {
                     }
                 }
                 DelegateChoice {
+                    roleValue: "floating"
+                    delegate: Toggle {
+                        icon: WindowLayout.floating ? "select_window" : "grid_view"
+                        checked: WindowLayout.floating
+                        onClicked: WindowLayout.toggle()
+                    }
+                }
+                DelegateChoice {
                     roleValue: "dnd"
                     delegate: Toggle {
                         icon: "notifications_off"
