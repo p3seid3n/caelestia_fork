@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import Caelestia.Config
 import Caelestia.I18n
 import qs.components.controls
+import qs.services
 import qs.modules.nexus.common
 
 PageBase {
@@ -40,15 +41,41 @@ PageBase {
     title: Tr.tr("Notifications")
     isSubPage: true
 
+    Component.onCompleted: NotifCentre.checkOwner()
+
     ColumnLayout {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         width: root.cappedWidth
         spacing: Tokens.spacing.extraSmall / 2
 
-        // Notifications
+        // Who receives notifications, and the notification centre
         SectionHeader {
             first: true
+            text: Tr.tr("Notification centre")
+        }
+
+        ToggleRow {
+            first: true
+            last: !NotifCentre.conflict
+            text: Tr.tr("Open from the top right corner")
+            subtext: Tr.tr("Touch the top edge near the right corner for a popup with all notifications; replaces opening the sidebar there")
+            checked: NotifCentre.enabled
+            onToggled: NotifCentre.setEnabled(checked)
+        }
+
+        RowButton {
+            visible: NotifCentre.conflict
+            last: true
+            icon: "warning"
+            iconLabel.color: Colours.palette.m3error
+            text: Tr.tr("%1 is taking your notifications").arg(NotifCentre.owner)
+            subtext: Tr.tr("Only one program can show notifications. Click to stop %1 and keep it from starting again; restart the shell afterwards.").arg(NotifCentre.owner)
+            onClicked: NotifCentre.stopOther()
+        }
+
+        // Notifications
+        SectionHeader {
             text: Tr.tr("Notifications")
         }
 

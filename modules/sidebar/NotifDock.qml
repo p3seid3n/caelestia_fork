@@ -19,6 +19,8 @@ Item {
     required property Props props
     required property ScreenState screenState
     readonly property int notifCount: Notifs.list.reduce((acc, n) => n.closed ? acc : acc + 1, 0)
+    // Height of title plus list, for containers that size themselves to the dock (notification centre).
+    readonly property real contentHeight: title.implicitHeight + Tokens.spacing.medium + notifList.implicitHeight + anchors.margins * 2 + Tokens.padding.extraSmall * 2
 
     anchors.fill: parent
     anchors.margins: Tokens.padding.medium

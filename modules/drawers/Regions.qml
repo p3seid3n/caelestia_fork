@@ -62,6 +62,12 @@ Region {
     }
 
     R {
+        panel: root.panels.notifCentre
+        y: 0
+        height: panel.height * (1 - root.panels.notifCentre.offsetScale) + root.borderThickness
+    }
+
+    R {
         panel: root.panels.utilities
         y: root.win.height - height
         height: panel.height * (1 - root.panels.utilities.offsetScale) + root.borderThickness

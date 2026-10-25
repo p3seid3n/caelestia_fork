@@ -6,6 +6,7 @@ import qs.modules.bar as Bar
 import qs.modules.dashboard as Dashboard
 import qs.modules.launcher as Launcher
 import qs.modules.notifications as Notifications
+import qs.modules.notifcentre as NotifCentre
 import qs.modules.osd as Osd
 import qs.modules.session as Session
 import qs.modules.sidebar as Sidebar
@@ -24,6 +25,7 @@ Item {
     readonly property alias osd: osd
     readonly property alias osdWrapper: osdWrapper
     readonly property alias notifications: notifications
+    readonly property alias notifCentre: notifCentre
     readonly property alias session: session
     readonly property alias sessionWrapper: sessionWrapper
     readonly property alias launcher: launcher
@@ -69,6 +71,15 @@ Item {
         osdPanel: osdWrapper
         sessionPanel: sessionWrapper
         utilitiesPanel: utilities
+
+        anchors.top: parent.top
+        anchors.right: parent.right
+    }
+
+    NotifCentre.Wrapper {
+        id: notifCentre
+
+        screenState: root.screenState
 
         anchors.top: parent.top
         anchors.right: parent.right

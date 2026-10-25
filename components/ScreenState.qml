@@ -11,6 +11,8 @@ PersistentProperties {
     property bool dashboard
     property bool utilities
     property bool sidebar
+    // KairosOS: notification centre in the top right corner
+    property bool notifCentre
 
     // Dashboard state
     property int dashboardTab

@@ -4,6 +4,7 @@ import Quickshell
 import Caelestia.Config
 import qs.components
 import qs.components.controls
+import qs.services
 import qs.modules.bar as Bar
 import qs.modules.bar.popouts as BarPopouts
 
@@ -22,6 +23,17 @@ CustomMouseArea {
     property bool dashboardShortcutActive
     property bool osdShortcutActive
     property bool utilitiesShortcutActive
+    property bool notifCentreShortcutActive
+
+    // Top edge near the right corner (or inside the open centre).
+    function inNotifCentre(x: real, y: real): bool {
+        if (!NotifCentre.enabled)
+            return false;
+        const centre = panels.notifCentre;
+        if (centre.offsetScale < 1)
+            return inTopPanel(centre, x, y);
+        return y < Math.max(Config.border.minThickness, Config.border.thickness) && x > width - NotifCentre.triggerWidth;
+    }
 
     function withinPanelHeight(panel: Item, x: real, y: real): bool {
         const panelY = root.borderThickness + panel.y;
@@ -77,6 +89,9 @@ CustomMouseArea {
 
             if (!utilitiesShortcutActive)
                 screenState.utilities = false;
+
+            if (!notifCentreShortcutActive)
+                screenState.notifCentre = false;
 
             if (!popouts.currentName.startsWith("traymenu") || ((popouts.current as StackView)?.depth ?? 0) <= 1) {
                 popouts.hasCurrent = false;
@@ -179,7 +194,7 @@ CustomMouseArea {
             }
 
             // Show/hide sidebar on hover
-            if (Config.sidebar.showOnHover && !pressed) {
+            if (Config.sidebar.showOnHover && !NotifCentre.enabled && !pressed) {
                 const sidebarTriggerY = Math.max(Config.sidebar.minHoverThreshold, panels.notifications.y + panels.notifications.height + borderThickness);
                 const showSidebarHover = x > Math.min(width - Config.border.minThickness, bar.implicitWidth + panels.sidebar.x) && y <= sidebarTriggerY;
                 if (showSidebarHover && !screenState.sidebar) {
@@ -225,6 +240,13 @@ CustomMouseArea {
             else if (dragY < -Config.dashboard.dragThreshold)
                 screenState.dashboard = false;
         }
+
+        // Show the notification centre on hover (top edge, right corner)
+        const showNotifCentre = inNotifCentre(x, y);
+        if (!notifCentreShortcutActive)
+            screenState.notifCentre = showNotifCentre;
+        else if (showNotifCentre)
+            notifCentreShortcutActive = false;
 
         // Show utilities on hover
         const showUtilities = inBottomPanel(panels.utilities, x, y, true);
@@ -292,6 +314,16 @@ CustomMouseArea {
             } else {
                 // OSD hidden, clear shortcut flag
                 root.osdShortcutActive = false;
+            }
+        }
+
+        function onNotifCentreChanged() {
+            if (root.screenState.notifCentre) {
+                // Opened by a shortcut while the pointer is elsewhere: stay open until hovered.
+                if (!root.inNotifCentre(root.mouseX, root.mouseY))
+                    root.notifCentreShortcutActive = true;
+            } else {
+                root.notifCentreShortcutActive = false;
             }
         }
 
