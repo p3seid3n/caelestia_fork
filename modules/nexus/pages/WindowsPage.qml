@@ -97,6 +97,20 @@ PageBase {
         }
 
         SectionHeader {
+            text: Tr.tr("Special workspaces")
+        }
+
+        ToggleRow {
+            first: true
+            last: true
+            text: Tr.tr("Click behind to hide")
+            subtext: WindowLayout.lua ? Tr.tr("Music (Super+M), messages (Super+D) and to-do (Super+R) open on top of your windows; clicking a window behind them hides them and brings it forward") : Tr.tr("Needs a Lua Hyprland config")
+            disabled: !WindowLayout.lua
+            checked: WindowLayout.dismissSpecial
+            onToggled: WindowLayout.setOption("dismissSpecial", checked)
+        }
+
+        SectionHeader {
             text: Tr.tr("Gaps and borders")
         }
 

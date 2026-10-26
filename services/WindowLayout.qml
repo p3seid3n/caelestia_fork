@@ -36,6 +36,8 @@ Singleton {
     property bool buttonsLeft: false
     property bool snap: true
     property bool resizeOnEdges: true
+    // Clicking a window behind an open special workspace (music, communication, ...) hides it.
+    property bool dismissSpecial: true
 
     // Gaps and borders; only applied while `customGaps` is on, otherwise the Hyprland config rules.
     property bool customGaps: false
@@ -138,6 +140,133 @@ Singleton {
         if (Object.keys(opts).length > 0)
             Hypr.extras.applyOptions(opts);
         applyTitleBars();
+        applyRuntime();
+    }
+
+    // Gap kept free around floating windows: the one to the screen edge, plus the border.
+    function edgeGap(): int {
+        const num = v => {
+            const n = parseInt(String(v ?? "").trim().split(/\s+/)[0]);
+            return isNaN(n) ? undefined : n;
+        };
+        const gap = customGaps ? gapsOut : (num(Hypr.options["general:gaps_out"]) ?? 10);
+        const border = customGaps ? borderSize : (num(Hypr.options["general:border_size"]) ?? 2);
+        return gap + border;
+    }
+
+    // Lua only: the handlers that live in Hyprland's Lua state (gone after a config reload, so they
+    // are set up again from onConfigReloaded):
+    //   - KAIROS.fit(w, centre): keeps a floating window inside the free part of its monitor, i.e.
+    //     inside the shell's frame and bar (the monitor's reserved area), the edge gap and room for
+    //     the title bar. Too large windows shrink, windows sticking out are moved back in; with
+    //     `centre` they are centred in that area.
+    //   - New windows in floating mode are fitted and centred; windows that land on a special
+    //     workspace (music, communication, ...) stay tiled there, like in tiling mode.
+    //   - Focusing a floating window (keyboard, launcher, taskbar) raises it above the others.
+    //   - While a special workspace is open on top, clicking a window behind it hides the special
+    //     workspace and brings that window forward, instead of the click doing nothing.
+    function applyRuntime(): void {
+        if (available && loaded && lua)
+            luaEval(runtimeLua());
+    }
+
+    function runtimeLua(): string {
+        return `KAIROS = KAIROS or {}
+        KAIROS.floating = ${floating}
+        KAIROS.dismiss = ${dismissSpecial}
+        KAIROS.gap = ${edgeGap()}
+        KAIROS.bar = ${floating && titleBars && hasTitleBarPlugin ? 32 : 0}
+        KAIROS.special = function(w)
+            local ws = w.workspace
+            return ws == nil or ws.special
+        end
+        KAIROS.area = function(m)
+            local s = m.scale or 1
+            if s <= 0 then s = 1 end
+            local mw, mh = m.width / s, m.height / s
+            if m.transform ~= nil and m.transform % 2 == 1 then mw, mh = mh, mw end
+            local r = m.reserved or {}
+            local g = KAIROS.gap
+            local x = m.x + (r.left or 0) + g
+            local y = m.y + (r.top or 0) + g + KAIROS.bar
+            local w = mw - (r.left or 0) - (r.right or 0) - 2 * g
+            local h = mh - (r.top or 0) - (r.bottom or 0) - 2 * g - KAIROS.bar
+            return x, y, w, h
+        end
+        KAIROS.fit = function(w, centre)
+            if w == nil or not w.floating or w.fullscreen ~= 0 or w.pinned or KAIROS.special(w) then return end
+            local m = w.monitor
+            if m == nil then return end
+            local ax, ay, aw, ah = KAIROS.area(m)
+            if aw < 200 or ah < 150 then return end
+            local cw, ch = w.size.x, w.size.y
+            local nw, nh = math.min(cw, math.floor(aw)), math.min(ch, math.floor(ah))
+            if nw < cw or nh < ch then
+                hl.dispatch(hl.dsp.window.resize({ window = w, x = nw, y = nh, relative = false }))
+            end
+            local x, y = w.at.x, w.at.y
+            local out = x < ax or y < ay or x + nw > ax + aw or y + nh > ay + ah
+            if centre or out then
+                local nx, ny = math.floor(ax + (aw - nw) / 2), math.floor(ay + (ah - nh) / 2)
+                if not centre then
+                    nx = math.floor(math.max(ax, math.min(x, ax + aw - nw)))
+                    ny = math.floor(math.max(ay, math.min(y, ay + ah - nh)))
+                end
+                hl.dispatch(hl.dsp.window.move({ window = w, x = nx, y = ny, relative = false }))
+            end
+        end
+        KAIROS.tagged = function(w)
+            for _, t in ipairs(w.tags or {}) do
+                if t == "kairosfloat" or t == "kairosfloat*" then return true end
+            end
+            return false
+        end
+        KAIROS.opened = function(w)
+            if not KAIROS.floating or w == nil then return end
+            if KAIROS.special(w) then
+                if w.floating and KAIROS.tagged(w) then
+                    hl.dispatch(hl.dsp.window.float({ window = w, action = "disable" }))
+                end
+                return
+            end
+            if KAIROS.tagged(w) then KAIROS.fit(w, true) end
+        end
+        KAIROS.focused = function(w)
+            if KAIROS.floating and w ~= nil and w.floating and not KAIROS.special(w) then
+                hl.dispatch(hl.dsp.window.alter_zorder({ window = w, mode = "top" }))
+            end
+        end
+        KAIROS.inside = function(w, p)
+            return p.x >= w.at.x and p.y >= w.at.y and p.x < w.at.x + w.size.x and p.y < w.at.y + w.size.y
+        end
+        KAIROS.clicked = function()
+            if not KAIROS.dismiss then return end
+            local m = hl.get_monitor_at_cursor()
+            if m == nil then return end
+            local sp = hl.get_active_special_workspace(m)
+            if sp == nil then return end
+            local p = hl.get_cursor_pos()
+            if p == nil then return end
+            for _, w in ipairs(sp:get_windows()) do
+                if KAIROS.inside(w, p) then return end
+            end
+            local ws = m.active_workspace
+            if ws == nil then return end
+            local hit = nil
+            for _, w in ipairs(ws:get_windows()) do
+                if KAIROS.inside(w, p) and (hit == nil or (w.floating and not hit.floating)) then hit = w end
+            end
+            if hit == nil then return end
+            hl.dispatch(hl.dsp.workspace.toggle_special((sp.name:gsub("^special:?", ""))))
+            hl.dispatch(hl.dsp.focus({ window = hit }))
+            KAIROS.focused(hit)
+        end
+        if KAIROS.hooked == nil then
+            KAIROS.hooked = true
+            pcall(hl.on, "window.open", function(w) pcall(KAIROS.opened, w) end)
+            pcall(hl.on, "window.active", function(w) pcall(KAIROS.focused, w) end)
+            pcall(hl.bind, "mouse:272", function() pcall(KAIROS.clicked) end, { non_consuming = true })
+        end`;
     }
 
     function applyTitleBars(): void {
@@ -184,15 +313,23 @@ Singleton {
             return;
         applyOptions();
         if (lua) {
-            luaEval(`if KAIROS_FLOAT == nil then
-                pcall(function() KAIROS_FLOAT = hl.window_rule({ name = "kairos-float", match = { class = ".*", modal = false }, float = true, center = true, tag = "+kairosfloat" }) end)
+            // Windows on special workspaces (music, communication, ...) keep their tiled overlay.
+            // The handlers go first in the same eval: separate messages are not guaranteed to
+            // arrive in order.
+            luaEval(runtimeLua() + `
+            if KAIROS_FLOAT == nil then
+                pcall(function() KAIROS_FLOAT = hl.window_rule({ name = "kairos-float", match = { class = ".*", modal = false, workspace = "s[false]" }, float = true, center = true, tag = "+kairosfloat" }) end)
             end
             if KAIROS_FLOAT ~= nil then KAIROS_FLOAT:set_enabled(true) end
             for _, w in ipairs(hl.get_windows()) do
-                if not w.floating and w.fullscreen == 0 then
+                if not KAIROS.special(w) and not w.floating and w.fullscreen == 0 then
                     hl.dispatch(hl.dsp.window.tag({ tag = "+kairosfloat", window = w }))
                     hl.dispatch(hl.dsp.window.float({ window = w, action = "enable" }))
-                    hl.dispatch(hl.dsp.window.center({ window = w }))
+                    pcall(KAIROS.fit, w, true)
+                elseif KAIROS.special(w) and w.floating and KAIROS.tagged(w) then
+                    hl.dispatch(hl.dsp.window.float({ window = w, action = "disable" }))
+                elseif w.floating and not w.pinned then
+                    pcall(KAIROS.fit, w, false)
                 end
             end`);
         } else {
@@ -200,7 +337,7 @@ Singleton {
             const next = floated.slice();
             for (const t of Hypr.toplevels.values) {
                 const ipc = t.lastIpcObject;
-                if (!ipc?.address || ipc.floating || (ipc.fullscreen ?? 0) !== 0)
+                if (!ipc?.address || ipc.floating || (ipc.fullscreen ?? 0) !== 0 || String(ipc.workspace?.name ?? "").startsWith("special"))
                     continue;
                 msgs.push(`dispatch setfloating address:${ipc.address}`);
                 next.push(ipc.address);
@@ -231,6 +368,16 @@ Singleton {
         // Snapping, edge resizing and title bars go back to what the Hyprland config says;
         // custom gaps are applied again after the reload.
         reloadTimer.restart();
+    }
+
+    // Moves floating windows back inside the free area, e.g. after the shell frame got thicker.
+    function refit(): void {
+        if (!available || !loaded || !lua || !floating)
+            return;
+        luaEval(runtimeLua() + `
+        for _, w in ipairs(hl.get_windows()) do
+            if w.floating then pcall(KAIROS.fit, w, false) end
+        end`);
     }
 
     function reloadHyprland(): void {
@@ -280,6 +427,16 @@ Singleton {
         target: Hypr
     }
 
+    // The frame and bar take part of the screen (Hyprland's reserved area); keep windows clear of it.
+    Connections {
+        function onThicknessChanged(): void {
+            refitTimer.restart();
+        }
+
+        target: Config.border
+        ignoreUnknownSignals: true
+    }
+
     // Title bars as soon as hyprbars is installed and loaded.
     Connections {
         function onHyprbarsLoadedChanged(): void {
@@ -295,7 +452,11 @@ Singleton {
         function onRawEvent(event: HyprlandEvent): void {
             if (root.lua || !root.floating || event.name !== "openwindow")
                 return;
-            const address = "0x" + event.data.split(",")[0];
+            const fields = event.data.split(",");
+            // Apps on special workspaces (music, communication, ...) stay tiled there.
+            if ((fields[1] ?? "").startsWith("special"))
+                return;
+            const address = "0x" + fields[0];
             root.floated = root.floated.concat([address]);
             Hypr.extras.message(`dispatch setfloating address:${address}`);
         }
@@ -318,6 +479,13 @@ Singleton {
     }
 
     Timer {
+        id: refitTimer
+
+        interval: 700
+        onTriggered: root.refit()
+    }
+
+    Timer {
         id: reloadTimer
 
         interval: 150
@@ -334,6 +502,7 @@ Singleton {
                 buttonsLeft: root.buttonsLeft,
                 snap: root.snap,
                 resizeOnEdges: root.resizeOnEdges,
+                dismissSpecial: root.dismissSpecial,
                 customGaps: root.customGaps,
                 gapsIn: root.gapsIn,
                 gapsOut: root.gapsOut,
@@ -357,6 +526,7 @@ Singleton {
                 root.buttonsLeft = c.buttonsLeft === true;
                 root.snap = c.snap !== false;
                 root.resizeOnEdges = c.resizeOnEdges !== false;
+                root.dismissSpecial = c.dismissSpecial !== false;
                 root.customGaps = c.customGaps === true;
                 root.gapsIn = int(c.gapsIn, 0, 60, root.gapsIn);
                 root.gapsOut = int(c.gapsOut, 0, 80, root.gapsOut);
