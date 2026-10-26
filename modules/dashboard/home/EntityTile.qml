@@ -7,11 +7,17 @@ import Caelestia.I18n
 import qs.components
 import qs.services
 
-// One Home Assistant device as a Material You tile. Content adapts to the tile size:
-//   1 column            -> icon only (tall light/cover/volume tiles become a vertical slider)
+// One Home Assistant device as a Material You tile. The shape decides the layout, and the
+// slider follows the tile's long side (default shapes: HomeAssistant.shapeFor()):
+//   1×1                 -> icon with the name under it: a single tap target
+//   1×2+ (tall)         -> dimmable lights, blinds, volume, fan: the whole tile is a vertical
+//                          slider, filling from the bottom
+//   3+×1 (wide)         -> the same devices as a horizontal slider filling from the left,
+//                          name and value on top
 //   2+ columns          -> icon, name and state
-//   1 row, 4+ columns   -> main control inline next to the name
-//   2+ rows             -> controls underneath (all of them on big tiles)
+//   4+×1                -> main control inline next to the name (media, climate, ...)
+//   2+ rows             -> controls underneath (all of them on big tiles); sensors show their
+//                          value large
 // The icon toggles the device; the rest of the tile opens the full view (expand()).
 StyledRect {
     id: root
@@ -37,9 +43,11 @@ StyledRect {
 
     // Layout decisions
     readonly property bool showText: cols >= 2
-    readonly property bool inlineControls: rows === 1 && cols >= 4
+    readonly property bool inlineControls: rows === 1 && cols >= 4 && !horizontalSlider
+    // Sensors on a big tile: the value is what matters.
+    readonly property bool bigValue: can.value && cols >= 2 && rows >= 2
     readonly property int controlLevel: {
-        if (cols < 2)
+        if (cols < 2 || horizontalSlider || bigValue)
             return 0;
         if (rows === 1)
             return cols >= 4 ? 1 : 0;
@@ -50,6 +58,8 @@ StyledRect {
 
     // Vertical slider mode (iOS-style) for narrow, tall tiles.
     readonly property bool verticalSlider: cols === 1 && rows >= 2 && sliderKind !== ""
+    // Horizontal slider mode for wide, one-row tiles. Media players keep their playback buttons.
+    readonly property bool horizontalSlider: rows === 1 && cols >= 3 && sliderKind !== "" && domain !== "media_player"
     readonly property string sliderKind: {
         if (can.brightness)
             return "brightness";
@@ -142,6 +152,8 @@ StyledRect {
         const dc = attrs.device_class ?? "";
         if (domain === "light" && on && attrs.brightness !== null)
             return `${Math.round(attrs.brightness / 2.55)}%`;
+        if (domain === "fan" && on && attrs.percentage !== undefined && attrs.percentage !== null)
+            return `${attrs.percentage}%`;
         if (domain === "cover" && attrs.current_position !== undefined && entity.state !== "closed")
             return Tr.tr("Open %1%").arg(attrs.current_position);
         if (domain === "climate")
@@ -188,7 +200,7 @@ StyledRect {
 
     // Tap on the tile body: open the full view.
     StateLayer {
-        visible: !root.verticalSlider
+        visible: !root.verticalSlider && !root.horizontalSlider
         disabled: root.editing
         radius: root.radius
         color: root.on ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurface
@@ -216,6 +228,35 @@ StyledRect {
             }
         }
 
+        ColumnLayout {
+            // The fill reaches the labels: switch to the colour that reads on it.
+            readonly property bool overFill: (vMouse.pressed && vMouse.moved ? vMouse.value : root.sliderValue) * root.height > root.height - y - height
+
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Tokens.padding.medium
+            spacing: 0
+
+            StyledText {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                text: root.attrs.friendly_name ?? root.entityId
+                elide: Text.ElideRight
+                font: Tokens.font.label.medium
+                color: parent.overFill ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
+            }
+
+            StyledText {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                text: vMouse.pressed && vMouse.moved ? `${Math.round(vMouse.value * 100)}%` : root.stateText
+                elide: Text.ElideRight
+                font: Tokens.font.label.small
+                color: parent.overFill ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+            }
+        }
+
         MaterialIcon {
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: parent.bottom
@@ -233,13 +274,13 @@ StyledRect {
             property real startY
             property bool moved
 
-            anchors.fill: parent
-            enabled: !root.editing
-            preventStealing: true
-
             function valueAt(y: real): real {
                 return Math.max(0, Math.min(1, 1 - y / height));
             }
+
+            anchors.fill: parent
+            enabled: !root.editing
+            preventStealing: true
 
             onPressed: e => {
                 startY = e.y;
@@ -260,6 +301,71 @@ StyledRect {
                 else
                     root.expand();
             }
+            onPressAndHold: {
+                if (!moved)
+                    root.editRequested();
+            }
+        }
+    }
+
+    // --- Horizontal slider tile (fill behind the normal header) ------------------
+    Item {
+        anchors.fill: parent
+        visible: root.horizontalSlider
+
+        StyledRect {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: parent.width * (hMouse.pressed && hMouse.moved ? hMouse.value : root.sliderValue)
+            color: root.sliderKind === "brightness" ? root.accent : Colours.palette.m3primary
+            opacity: 0.3
+
+            Behavior on width {
+                enabled: !hMouse.pressed
+
+                Anim {}
+            }
+        }
+
+        MouseArea {
+            id: hMouse
+
+            property real value
+            property real startX
+            property bool moved
+
+            function valueAt(x: real): real {
+                return Math.max(0, Math.min(1, x / width));
+            }
+
+            anchors.fill: parent
+            enabled: !root.editing
+            preventStealing: true
+
+            onPressed: e => {
+                startX = e.x;
+                moved = false;
+                value = root.sliderValue;
+            }
+            onPositionChanged: e => {
+                if (Math.abs(e.x - startX) > 4)
+                    moved = true;
+                if (moved) {
+                    value = valueAt(e.x);
+                    root.setSlider(value);
+                }
+            }
+            onReleased: e => {
+                if (moved)
+                    root.setSlider(valueAt(e.x));
+                else
+                    root.expand();
+            }
+            onPressAndHold: {
+                if (!moved)
+                    root.editRequested();
+            }
         }
     }
 
@@ -274,10 +380,15 @@ StyledRect {
         columnSpacing: Tokens.spacing.large
         rowSpacing: Tokens.spacing.medium
 
+        Item {
+            // Small tiles: icon and name centred together.
+            visible: !root.showText
+            Layout.fillHeight: true
+        }
+
         RowLayout {
             Layout.fillWidth: true
-            Layout.alignment: root.showText ? Qt.AlignTop : Qt.AlignCenter
-            Layout.fillHeight: !root.showText // small tiles: centre the icon
+            Layout.alignment: root.horizontalSlider ? Qt.AlignVCenter : root.showText ? Qt.AlignTop : Qt.AlignHCenter
             Layout.preferredWidth: root.inlineControls ? content.width * 0.4 : -1
             spacing: Tokens.spacing.medium
 
@@ -332,13 +443,41 @@ StyledRect {
 
                 StyledText {
                     Layout.fillWidth: true
-                    text: root.stateText
+                    visible: !root.bigValue
+                    text: hMouse.pressed && hMouse.moved ? `${Math.round(hMouse.value * 100)}%` : root.stateText
                     elide: Text.ElideRight
                     font: Tokens.font.body.small
                     color: root.on ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
                     opacity: 0.8
                 }
             }
+        }
+
+        // 1×1: the name under the icon.
+        StyledText {
+            visible: !root.showText
+            Layout.fillWidth: true
+            Layout.leftMargin: Tokens.padding.small
+            Layout.rightMargin: Tokens.padding.small
+            horizontalAlignment: Text.AlignHCenter
+            text: root.attrs.friendly_name ?? root.entityId
+            elide: Text.ElideRight
+            font: Tokens.font.label.medium
+            color: root.on ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
+        }
+
+        // Big sensor tiles: the reading itself.
+        StyledText {
+            visible: root.bigValue
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            verticalAlignment: Text.AlignBottom
+            text: root.stateText
+            elide: Text.ElideRight
+            fontSizeMode: Text.HorizontalFit
+            minimumPointSize: 12
+            font: Tokens.font.headline.builders.medium.weight(Font.DemiBold).build()
+            color: root.on ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurface
         }
 
         EntityControls {
@@ -350,8 +489,8 @@ StyledRect {
         }
 
         Item {
-            // Pushes the header to the top on tall tiles.
-            visible: !root.inlineControls && root.showText
+            // Pushes the header to the top on tall tiles (and centres small ones).
+            visible: !root.inlineControls && !root.bigValue && !root.horizontalSlider
             Layout.fillHeight: true
         }
     }

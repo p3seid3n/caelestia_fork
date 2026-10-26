@@ -66,6 +66,15 @@ Item {
                 color: Colours.palette.m3onSurface
             }
 
+            // Every tile back to the shape that fits its device, bigger tiles first.
+            IconTextButton {
+                visible: HomeAssistant.connected && root.editing && HomeAssistant.tiles.length > 1
+                type: IconTextButton.Tonal
+                icon: "auto_awesome_mosaic"
+                text: Tr.tr("Arrange")
+                onClicked: HomeAssistant.arrange(true)
+            }
+
             IconButton {
                 visible: HomeAssistant.connected && root.editing
                 type: IconButton.Text

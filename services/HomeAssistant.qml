@@ -32,6 +32,8 @@ Singleton {
     readonly property int columns: 8
     property var tiles: []
     readonly property list<string> selected: tiles.map(t => t.id)
+    // Which default tile shapes have been applied to saved tiles (see arrange()).
+    property int shapesVersion: 1
 
     // Doors, locks and alarms: hidden in the editor unless explicitly shown, and need a confirmation tap.
     readonly property list<string> sensitiveDomains: ["cover", "lock", "alarm_control_panel", "valve", "siren"]
@@ -159,13 +161,76 @@ Singleton {
 
     function setSelected(entityId: string, on: bool): void {
         const next = tiles.filter(t => t.id !== entityId);
-        if (on)
+        if (on) {
+            const shape = shapeFor(entityId);
             next.push({
                 id: entityId,
-                w: 2,
-                h: 1
+                w: shape.w,
+                h: shape.h
             });
+        }
         setTiles(next);
+    }
+
+    // The tile shape that fits what a device does (cells of the 8-column grid). The shape follows
+    // the control: the axis a slider moves along is the tile's long side, and how much space a tile
+    // gets follows how much it has to show.
+    //   1×2 tall      dimmable lights, blinds  - vertical slider; up is brighter / more open,
+    //                                            like the blind itself moves
+    //   4×1 wide      fan speed                - horizontal slider, a dial turned flat
+    //   1×1 square    plain switches, people   - one tap, nothing to adjust; the whole tile is
+    //                                            the button
+    //   2×1 pill      scenes, scripts, sensors - a name and a word or a value to read; doors and
+    //                 locks                      locks need the room for "Tap again to confirm"
+    //   2×2 square    thermostats, humidifiers - target value with − / + and the mode
+    //   4×2 card      media players            - title, artist, playback and volume
+    function shapeFor(entityId: string): var {
+        const d = domainOf(entityId);
+        const f = features(entityId);
+        const shape = (w, h) => ({
+                w,
+                h
+            });
+        if (f.media)
+            return shape(4, 2);
+        if (f.climate || d === "humidifier")
+            return shape(2, 2);
+        if (f.brightness || (f.position && !isSensitive(entityId)))
+            return shape(1, 2);
+        if (f.fanSpeed)
+            return shape(4, 1);
+        if (d === "person")
+            return shape(1, 1);
+        if (d === "sensor" || d === "binary_sensor" || d in runServices || isSensitive(entityId))
+            return shape(2, 1);
+        if (toggleDomains.includes(d))
+            return shape(1, 1);
+        return shape(2, 1);
+    }
+
+    // Gives every tile its default shape. With `reorder`, bigger tiles go first so the grid packs
+    // without holes: rich cards on top, quick toggles filling in underneath (same-sized tiles keep
+    // their order).
+    function arrange(reorder: bool): void {
+        const next = tiles.map((t, i) => {
+            const shape = byId[t.id] ? shapeFor(t.id) : {
+                w: t.w,
+                h: t.h
+            };
+            return {
+                id: t.id,
+                w: shape.w,
+                h: shape.h,
+                i
+            };
+        });
+        if (reorder)
+            next.sort((a, b) => (b.w * b.h - a.w * a.h) || (b.h - a.h) || (a.i - b.i));
+        setTiles(next.map(t => ({
+                    id: t.id,
+                    w: t.w,
+                    h: t.h
+                })));
     }
 
     function setTiles(next: var): void {
@@ -341,6 +406,13 @@ Singleton {
                     map[e.entity_id] = e;
                 entities = list;
                 byId = map;
+                // Tiles from before the shapes existed were all 2×1: shape them once.
+                if (root.shapesVersion < 1) {
+                    if (root.tiles.length > 0 && root.tiles.every(t => t.w === 2 && t.h === 1))
+                        root.arrange(true);
+                    root.shapesVersion = 1;
+                    settingsSaveTimer.restart();
+                }
             } catch (error) {
                 console.warn("HomeAssistant: could not parse states:", error);
             }
@@ -417,7 +489,8 @@ Singleton {
 
         interval: 500
         onTriggered: settings.setText(JSON.stringify({
-                tiles: root.tiles
+                tiles: root.tiles,
+                shapes: root.shapesVersion
             }))
     }
 
@@ -429,6 +502,7 @@ Singleton {
         onLoaded: {
             try {
                 const c = JSON.parse(text());
+                root.shapesVersion = typeof c.shapes === "number" ? c.shapes : 0;
                 if (c.tiles)
                     root.tiles = c.tiles;
                 else if (c.selected) // older format: plain list of ids
@@ -444,7 +518,8 @@ Singleton {
         onLoadFailed: err => {
             if (err === FileViewError.FileNotFound)
                 Qt.callLater(() => setText(JSON.stringify({
-                        tiles: []
+                        tiles: [],
+                        shapes: 1
                     })));
         }
     }
