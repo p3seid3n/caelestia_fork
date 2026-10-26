@@ -139,8 +139,12 @@ Item {
             id: view
 
             readonly property int currentIndex: root.screenState.dashboardTab
+            // Bumped whenever the Repeater adds or removes a pane, so currentItem never stays
+            // null when a pane arrives after the count changed.
+            property int paneVersion
             readonly property Item currentItem: {
                 repeater.count; // Trigger update on count change
+                paneVersion;
                 return repeater.itemAt(currentIndex);
             }
 
@@ -187,6 +191,9 @@ Item {
                 Repeater {
                     id: repeater
 
+                    onItemAdded: view.paneVersion++
+                    onItemRemoved: view.paneVersion++
+
                     model: ScriptModel {
                         values: root.dashboardTabs
                     }
@@ -211,6 +218,9 @@ Item {
                         Layout.alignment: Qt.AlignTop
 
                         sourceComponent: modelData.component
+                        // Nothing is built before the binding below decides (a Loader starts
+                        // active, which used to build every tab once at start).
+                        active: false
 
                         opacity: inView ? 1 : 0
                         onLoaded: built = true

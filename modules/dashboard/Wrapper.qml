@@ -47,6 +47,8 @@ Item {
     readonly property real nonAnimHeight: (content.item as Content)?.nonAnimHeight ?? 0
     readonly property bool shouldBeActive: screenState.dashboard && Config.dashboard.enabled
     property real offsetScale: shouldBeActive ? 0 : 1
+    // Set a moment after shell start: the content is then built while nothing else happens.
+    property bool warm
 
     visible: offsetScale < 1
     anchors.topMargin: (-implicitHeight - 5) * offsetScale
@@ -56,6 +58,12 @@ Item {
 
     Behavior on offsetScale {
         Anim {}
+    }
+
+    Timer {
+        running: Config.dashboard.enabled && !root.warm
+        interval: 2500
+        onTriggered: root.warm = true
     }
 
     Connections {
@@ -72,10 +80,11 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
 
-        // KairosOS: built once in the background at shell start and kept, so opening the
-        // dashboard only slides it in instead of building every tab again each time.
-        active: Config.dashboard.enabled
-        asynchronous: true
+        // KairosOS: built once shortly after shell start (or on first open, if that comes
+        // earlier) and kept, so opening the dashboard only slides it in instead of building every
+        // tab again each time. Not asynchronous: the tab Repeaters inside do not report their
+        // items reliably when incubated asynchronously, which left the dashboard empty.
+        active: Config.dashboard.enabled && (root.warm || root.shouldBeActive || root.visible)
 
         sourceComponent: Content {
             screenState: root.screenState
