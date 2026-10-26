@@ -75,6 +75,9 @@ Singleton {
         for (const e of remoteEvents) {
             if (hidden.includes(e.cal))
                 continue;
+            // School notices that do not concern the student are listed apart (hiddenOn()).
+            if (e.kind === "message" && e.relevance !== "show")
+                continue;
             const subject = e.code ? (codes[e.code] ?? "") : "";
             if (e.kind === "lesson" && subject !== "" && hiddenSubjects.includes(subject))
                 continue;
@@ -84,6 +87,50 @@ Singleton {
         }
         out.sort((a, b) => (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) || a.start - b.start);
         return out;
+    }
+
+    // School notices that were left out of the calendar: [{..., relevance: "hide" | "unsure", reason}],
+    // per day like byDay.
+    readonly property var hiddenByDay: {
+        const map = {};
+        for (const e of remoteEvents) {
+            if (e.kind !== "message" || e.relevance === "show" || hidden.includes(e.cal))
+                continue;
+            const day = new Date(e.start);
+            const key = keyOf(day);
+            if (!map[key])
+                map[key] = [];
+            map[key].push(e);
+        }
+        for (const key in map)
+            map[key].sort((a, b) => (a.relevance === b.relevance ? a.start - b.start : a.relevance === "unsure" ? -1 : 1));
+        return map;
+    }
+
+    // Everything coming up that is not a plain lesson, soonest first, computed once per change:
+    // [{id, kind, title, detail, start, end, allDay, subject, cal, event | task}]
+    readonly property var upcomingAll: {
+        const out = [];
+        for (const e of events) {
+            if (e.kind === "lesson")
+                continue;
+            out.push({
+                id: e.id,
+                kind: e.kind === "test" ? "test" : e.kind === "message" ? "message" : "event",
+                title: titleOf(e),
+                detail: detailOf(e),
+                start: e.start,
+                end: e.end,
+                allDay: e.allDay,
+                subject: e.subject ?? "",
+                cal: e.cal,
+                event: e,
+                task: null
+            });
+        }
+        for (const i of Assignments.open)
+            out.push(taskItem(i));
+        return out.sort((a, b) => a.start - b.start);
     }
 
     // Event id -> event, for lists that only hold ids.
@@ -143,7 +190,7 @@ Singleton {
             if (e.kind === "lesson") {
                 if (!e.cancelled)
                     found.push(Subjects.colourOf(e.subject));
-            } else if (e.kind !== "test" && !cals.includes(e.cal)) {
+            } else if (e.kind === "event" && !cals.includes(e.cal)) {
                 cals.push(e.cal);
                 found.push(colourOf(e.cal));
             }
@@ -196,31 +243,28 @@ Singleton {
         return events.find(e => e.kind === "lesson" && e.subject === subject && !e.cancelled && e.start > after) ?? null;
     }
 
-    // What is coming up, soonest first: exams and events from the calendars (no plain lessons) and
-    // open homework, exams and reminders. Items: {id, kind ("event", "test" or "task"), title,
-    // detail, start, end, allDay, accent, event | task}.
+    // What is coming up, soonest first: exams, notices and events from the calendars (no plain
+    // lessons) and open homework, exams and reminders. Items as in upcomingAll, plus `accent`.
     function upcoming(count: int): var {
         const now = Date.now();
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
         const out = [];
-        for (const e of events) {
-            if (e.kind === "lesson" || (e.end <= now && e.start < now))
+        for (const u of upcomingAll) {
+            // Tasks stay until done (also when overdue), events until they are over.
+            if (u.task ? u.start < start.getTime() - 30 * 86400000 : u.end <= now && u.start < now)
                 continue;
-            out.push({
-                id: e.id,
-                kind: e.kind === "test" ? "test" : "event",
-                title: titleOf(e),
-                detail: detailOf(e),
-                start: e.start,
-                end: e.end,
-                allDay: e.allDay,
-                accent: accentOf(e),
-                event: e,
-                task: null
-            });
+            out.push(Object.assign({
+                accent: u.task ? (u.subject ? Subjects.colourOf(u.subject) : Colours.palette.m3primary) : (u.subject ? Subjects.colourOf(u.subject) : colourOf(u.cal))
+            }, u));
+            if (out.length >= count)
+                break;
         }
-        for (const i of Assignments.upcoming(count, true))
-            out.push(taskItem(i));
-        return out.sort((a, b) => a.start - b.start).slice(0, count);
+        return out;
+    }
+
+    function hiddenOn(day: date): var {
+        return hiddenByDay[keyOf(day)] ?? [];
     }
 
     function taskItem(i: var): var {
@@ -232,7 +276,8 @@ Singleton {
             start: i.due,
             end: i.due,
             allDay: !i.hasTime,
-            accent: i.subject ? Subjects.colourOf(i.subject) : Colours.palette.m3primary,
+            subject: i.subject,
+            cal: "",
             event: null,
             task: i
         };

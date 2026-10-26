@@ -10,9 +10,10 @@ import qs.components.containers
 import qs.components.controls
 import qs.services
 
-// Side panel of the Calendar tab for the chosen day: exams first, then homework and reminders
-// (tick them off right here), other events, the day's lessons in one compact list, and finally
-// what is coming up (exams and open homework, not every lesson).
+// The chosen day's itinerary (right half of the Calendar tab's month view): exams first, then
+// homework and reminders (tick them off right here), school notices that concern the student,
+// other events, the day's lessons in one compact list, the notices that were left out (unsure
+// ones first, each with the reason; folded until asked for), and finally what is coming up.
 ColumnLayout {
     id: root
 
@@ -22,6 +23,16 @@ ColumnLayout {
     readonly property var dayEvents: Calendars.eventsOn(day)
     readonly property var exams: dayEvents.filter(e => e.kind === "test")
     readonly property var others: dayEvents.filter(e => e.kind === "event")
+    readonly property var notices: dayEvents.filter(e => e.kind === "message")
+    readonly property var hiddenNotices: Calendars.hiddenOn(day)
+    readonly property int unsureCount: hiddenNotices.filter(e => e.relevance === "unsure").length
+    readonly property var hiddenById: {
+        const map = {};
+        for (const e of hiddenNotices)
+            map[e.id] = e;
+        return map;
+    }
+    property bool showHidden
     readonly property var lessons: dayEvents.filter(e => e.kind === "lesson")
     readonly property var tasks: Assignments.on(day)
     readonly property var coming: {
@@ -36,7 +47,7 @@ ColumnLayout {
     }
     // Plain strings keep the list in place when events refresh.
     readonly property var rows: {
-        const out = exams.map(e => "x:" + e.id).concat(tasks.map(t => "t:" + t.id), others.map(e => "e:" + e.id));
+        const out = exams.map(e => "x:" + e.id).concat(tasks.map(t => "t:" + t.id), notices.map(e => "m:" + e.id), others.map(e => "e:" + e.id));
         if (lessons.length > 0) {
             out.push("lh:");
             for (const e of lessons)
@@ -44,6 +55,12 @@ ColumnLayout {
         }
         if (out.length === 0)
             out.push("n:");
+        if (hiddenNotices.length > 0) {
+            out.push("hh:");
+            if (showHidden)
+                for (const e of hiddenNotices)
+                    out.push("hm:" + e.id);
+        }
         if (coming.length > 0) {
             out.push("uh:");
             for (const u of coming)
@@ -86,6 +103,7 @@ ColumnLayout {
         return d.toLocaleDateString(Qt.locale(), "ddd d MMM");
     }
 
+    onDayChanged: showHidden = false
     spacing: Tokens.spacing.small
 
     RowLayout {
@@ -150,7 +168,8 @@ ColumnLayout {
             required property string modelData
             readonly property string kind: modelData.slice(0, modelData.indexOf(":"))
             readonly property string key: modelData.slice(modelData.indexOf(":") + 1)
-            readonly property var event: kind === "x" || kind === "e" || kind === "l" ? (Calendars.byId[key] ?? null) : null
+            readonly property var event: kind === "x" || kind === "e" || kind === "l" || kind === "m" ? (Calendars.byId[key] ?? null) : null
+            readonly property var hiddenNotice: kind === "hm" ? (root.hiddenById[key] ?? null) : null
             readonly property var task: kind === "t" ? (Assignments.byId[key] ?? null) : null
             readonly property var up: kind === "u" ? (root.comingById[key] ?? null) : null
 
@@ -163,7 +182,10 @@ ColumnLayout {
                 case "uh":
                     return 30;
                 case "n":
+                case "hh":
                     return 40;
+                case "hm":
+                    return 58;
                 default:
                     return 54;
                 }
@@ -187,6 +209,99 @@ ColumnLayout {
                 text: Tr.tr("Nothing planned")
                 font: Tokens.font.body.medium
                 color: Colours.palette.m3onSurfaceVariant
+            }
+
+            // Left-out notices: a fold-out row, then one dim card per notice with the reason.
+            StyledRect {
+                anchors.fill: parent
+                anchors.topMargin: Tokens.padding.small
+                visible: row.kind === "hh"
+                radius: Tokens.rounding.full
+                color: Colours.tPalette.m3surfaceContainer
+
+                StateLayer {
+                    radius: parent.radius
+                    onClicked: root.showHidden = !root.showHidden
+                }
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Tokens.padding.large
+                    anchors.rightMargin: Tokens.padding.medium
+                    spacing: Tokens.spacing.small
+
+                    MaterialIcon {
+                        text: "filter_alt"
+                        color: Colours.palette.m3onSurfaceVariant
+                        fontStyle: Tokens.font.icon.small
+                    }
+
+                    StyledText {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        text: {
+                            const hidden = Tr.trN("%n notice left out", "%n notices left out", root.hiddenNotices.length);
+                            return root.unsureCount > 0 ? hidden + " · " + Tr.trN("%n unsure", "%n unsure", root.unsureCount) : hidden;
+                        }
+                        font: Tokens.font.body.small
+                        color: root.unsureCount > 0 ? Colours.palette.m3tertiary : Colours.palette.m3onSurfaceVariant
+                    }
+
+                    MaterialIcon {
+                        text: "expand_more"
+                        rotation: root.showHidden ? 180 : 0
+                        color: Colours.palette.m3onSurfaceVariant
+
+                        Behavior on rotation {
+                            Anim {
+                                type: Anim.FastSpatial
+                            }
+                        }
+                    }
+                }
+            }
+
+            StyledRect {
+                anchors.fill: parent
+                visible: row.kind === "hm" && row.hiddenNotice !== null
+                radius: Tokens.rounding.large
+                color: row.hiddenNotice?.relevance === "unsure" ? Qt.alpha(Colours.palette.m3tertiary, 0.1) : "transparent"
+                border.width: 1
+                border.color: Colours.palette.m3outlineVariant
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Tokens.padding.medium
+                    anchors.rightMargin: Tokens.padding.medium
+                    spacing: Tokens.spacing.medium
+
+                    MaterialIcon {
+                        text: row.hiddenNotice?.relevance === "unsure" ? "help" : "visibility_off"
+                        color: row.hiddenNotice?.relevance === "unsure" ? Colours.palette.m3tertiary : Colours.palette.m3outline
+                        fontStyle: Tokens.font.icon.small
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        StyledText {
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                            text: row.hiddenNotice?.title ?? ""
+                            font: Tokens.font.body.small
+                            color: Colours.palette.m3onSurfaceVariant
+                        }
+
+                        StyledText {
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                            text: row.hiddenNotice ? (row.hiddenNotice.relevance === "unsure" ? Tr.tr("Not sure: %1").arg(row.hiddenNotice.reason) : Tr.tr("Left out: %1").arg(row.hiddenNotice.reason)) : ""
+                            font: Tokens.font.body.small
+                            color: row.hiddenNotice?.relevance === "unsure" ? Colours.palette.m3tertiary : Colours.palette.m3outline
+                        }
+                    }
+                }
             }
 
             // Lesson: one compact line
@@ -244,6 +359,7 @@ ColumnLayout {
 
                 readonly property bool exam: row.kind === "x" || (row.up?.kind === "test") || (row.task?.type === "exam") || (row.up?.task?.type === "exam")
                 readonly property var theTask: row.task ?? row.up?.task ?? null
+                readonly property bool notice: row.kind === "m" || row.up?.kind === "message"
                 readonly property color accent: {
                     if (row.event)
                         return Calendars.accentOf(row.event);
@@ -255,7 +371,7 @@ ColumnLayout {
                 }
 
                 anchors.fill: parent
-                visible: (row.kind === "x" || row.kind === "e" || row.kind === "t" || row.kind === "u") && (row.event || row.task || row.up)
+                visible: (row.kind === "x" || row.kind === "e" || row.kind === "m" || row.kind === "t" || row.kind === "u") && (row.event || row.task || row.up)
                 radius: Tokens.rounding.large
                 color: exam ? Qt.alpha(Colours.palette.m3error, 0.12) : Colours.tPalette.m3surfaceContainer
                 opacity: card.theTask?.done ? 0.55 : 1
@@ -314,9 +430,17 @@ ColumnLayout {
                             fontStyle: Tokens.font.icon.medium
                         }
 
+                        MaterialIcon {
+                            anchors.centerIn: parent
+                            visible: card.notice
+                            text: "campaign"
+                            color: Colours.palette.m3secondary
+                            fontStyle: Tokens.font.icon.medium
+                        }
+
                         StyledRect {
                             anchors.centerIn: parent
-                            visible: card.theTask === null && !card.exam
+                            visible: card.theTask === null && !card.exam && !card.notice
                             implicitWidth: 4
                             implicitHeight: 24
                             radius: Tokens.rounding.full
@@ -354,6 +478,8 @@ ColumnLayout {
                                     const when = root.relative(row.up.start) + (row.up.allDay ? "" : " · " + root.clock(row.up.start));
                                     return row.up.detail ? when + " · " + row.up.detail : when;
                                 }
+                                if (row.event?.kind === "message")
+                                    return root.span(row.event) + " · " + row.event.reason;
                                 if (row.event) {
                                     const detail = Calendars.detailOf(row.event);
                                     return root.span(row.event) + (detail ? " · " + detail : "");

@@ -401,6 +401,7 @@ def expand(cal_id, raws, range_start, range_end):
                 "uid": uid,
                 "title": first_text(raw, "SUMMARY") or "(no title)",
                 "location": first_text(raw, "LOCATION"),
+                "desc": first_text(raw, "DESCRIPTION")[:400],
                 "allDay": all_day,
                 "start": start_ms,
                 "end": max(end_ms, start_ms),
@@ -533,8 +534,128 @@ def classify(title):
     return "event", "", "", ""
 
 
+# ---------------------------------------------------------------- school messages
+#
+# Besides lessons, school feeds carry notices for the whole school: "Der Unterricht von Herrn Stefan
+# Greising fällt für die Klasse 3d am Montag aus", "Elternabend FMS ... 1. Klassen", "Mittagsforum".
+# Only the ones that concern this student are shown:
+#   - they name one of the student's teachers (by code like "MaL", or by name: "Herrn Lucas
+#     Matter" / "L. Matter" give MaL, the school's code: first two letters of the surname and the
+#     first letter of the first name),
+#   - they name the student's class (found in the timetable: "3e"), or its whole grade ("3. Klassen"),
+#   - they are about the SOGO, or are school-wide days off (schulfrei, Ferien, Feiertag).
+# A notice that names one of the teachers but only other classes, or only a surname that could be
+# one of them, or nothing specific at all, is "unsure": listed separately, never in the calendar.
+# Shown cancellations strike through the lessons they cancel.
+
+MESSAGE_RE = re.compile(
+    r"(unterricht|lektion|fällt|fallen|ausfall|entfällt|klasse|eltern|konferenz|sitzung|anlass|forum|"
+    r"eingabeschluss|information|exkursion|ausflug|lehrperson|herrn?\b|frau\b|schulfrei|ferien|feiertag|sogo)",
+    re.I,
+)
+CANCEL_ANY_RE = re.compile(r"(fällt\b.*\baus|fallen\b.*\baus|ausfall|entfällt|entfallen|abgesagt|cancel)", re.I | re.S)
+DAY_OFF_RE = re.compile(r"(schulfrei|unterrichtsfrei|ferien|feiertag)", re.I)
+SOGO_RE = re.compile(r"\bsogo\b", re.I)
+GRADE_RE = re.compile(r"\b(\d)\.\s*klassen?\b", re.I)
+ALL_CLASSES_RE = re.compile(r"\balle\s+klassen\b|\bganze[n]?\s+schule\b", re.I)
+CLASS_TOKEN_RE = re.compile(r"(?<![\w-])([A-Z]?)(\d)([a-z]{1,6})(?:\s*[-–]\s*\1?\2?([a-z]))?(?![\w-])")
+NAME_RE = re.compile(r"\b(?:Herrn?|Frau)\s+([A-ZÄÖÜ][a-zäöüé]+)(?:\s+([A-ZÄÖÜ][a-zäöüé]+(?:-[A-ZÄÖÜ][a-zäöüé]+)?))?")
+INITIAL_RE = re.compile(r"\b([A-ZÄÖÜ])\.\s*([A-ZÄÖÜ][a-zäöüé]+(?:-[A-ZÄÖÜ][a-zäöüé]+)?)")
+UMLAUTS = str.maketrans("äöüÄÖÜé", "aouAOUe")
+
+
+def norm(code):
+    return code.translate(UMLAUTS).lower()
+
+
+def teacher_code(first, last):
+    return (last[:2].capitalize() + first[:1].upper()) if first else ""
+
+
+def classes_in(text):
+    """Class names mentioned in a text: "3e", "F1a", "3d/3e", "3abc" (= 3a 3b 3c), "3a-e"."""
+    found = set()
+    for prefix, grade, letters, until in CLASS_TOKEN_RE.findall(text):
+        if until and len(letters) == 1:
+            letters = "".join(chr(c) for c in range(ord(letters), ord(until) + 1))
+        for letter in letters:
+            found.add(f"{prefix}{grade}{letter}".lower())
+    return found
+
+
+def people_in(text):
+    """(code, surname) for people named in a text; code is "" when only the surname is known."""
+    out = []
+    for first_or_last, last in NAME_RE.findall(text):
+        if last:
+            out.append((teacher_code(first_or_last, last), last))
+        else:
+            out.append(("", first_or_last))
+    for initial, last in INITIAL_RE.findall(text):
+        out.append((teacher_code(initial, last), last))
+    return out
+
+
+def judge_message(text, my_teachers, my_classes):
+    """("show" | "hide" | "unsure", reason, teacher codes of mine named in it, whether anybody is named)."""
+    mine = {norm(t): t for t in my_teachers}
+    classes = classes_in(text)
+    my_class_named = bool(classes & {c.lower() for c in my_classes})
+    other_classes = sorted(classes - {c.lower() for c in my_classes})
+    grades = set(GRADE_RE.findall(text))
+    my_grades = {c[-2] for c in my_classes if len(c) >= 2 and c[-2].isdigit()}
+
+    codes = set()
+    maybe = []
+    strangers = []
+    for code_, surname in people_in(text):
+        if code_ and norm(code_) in mine:
+            codes.add(mine[norm(code_)])
+        elif code_:
+            strangers.append(surname)
+        else:
+            prefix = norm(surname[:2])
+            hits = [t for t in my_teachers if norm(t).startswith(prefix)]
+            (maybe if hits else strangers).append(surname)
+    for word in re.findall(r"\b[A-ZÄÖÜ][a-zäöü][A-ZÄÖÜ]\b", text):
+        if norm(word) in mine:
+            codes.add(mine[norm(word)])
+    named = bool(codes or maybe or strangers)
+
+    if SOGO_RE.search(text):
+        return "show", "SOGO", codes, named
+    if my_class_named:
+        return "show", "your class", codes, named
+    if codes and not other_classes:
+        return "show", "your teacher " + ", ".join(sorted(codes)), codes, named
+    if codes and other_classes:
+        return "unsure", f"your teacher {', '.join(sorted(codes))}, but for {', '.join(other_classes)}", set(), named
+    if grades & my_grades:
+        return "show", "your grade", codes, named
+    if ALL_CLASSES_RE.search(text):
+        return "show", "all classes", codes, named
+    if maybe and not other_classes:
+        return "unsure", "names " + ", ".join(maybe) + ", who might be one of your teachers", set(), named
+    if other_classes or grades:
+        what = other_classes or [f"{g}. Klassen" for g in sorted(grades)]
+        return "hide", "for " + ", ".join(what), set(), named
+    if strangers:
+        return "hide", "about " + ", ".join(strangers) + ", not one of your teachers", set(), named
+    if DAY_OFF_RE.search(text):
+        return "show", "everyone (day off)", codes, named
+    return "unsure", "school-wide notice without class or teacher", set(), named
+
+
+def is_message(e):
+    if e["kind"] not in ("event",):
+        return False
+    title = e["title"]
+    return e["allDay"] or len(title.split()) >= 5 or bool(MESSAGE_RE.search(title + " " + e["location"]))
+
+
 def mark_school(events):
-    """Classifies a school calendar's events and folds exam duplicates into one exam event."""
+    """Classifies a school calendar's events, folds exam duplicates into one exam event and sorts
+    school-wide notices into shown, hidden and unsure ones (see above)."""
     for e in events:
         kind, code, teacher, note = classify(e["title"]) if not e["allDay"] else ("event", "", "", "")
         e["kind"], e["code"], e["teacher"], e["note"] = kind, code, teacher, note
@@ -545,15 +666,40 @@ def mark_school(events):
     for e in lessons:
         by_slot.setdefault((e["start"], e["end"]), []).append(e)
 
+    # Who teaches this student and which class they are in, from the timetable itself.
+    my_teachers = {l["teacher"] for l in lessons if l["teacher"]}
+    class_count = {}
+    for l in lessons:
+        m = COURSE_RE.match(l["title"].strip())
+        for c in (re.split(r",\s*", m.group(3)) if m else []):
+            class_count[c] = class_count.get(c, 0) + 1
+    my_classes = set()
+    if class_count:
+        top = max(class_count.values())
+        my_classes = {c for c, n in class_count.items() if n >= top * 0.5}
+
     def overlapping_lessons(e):
         exact = by_slot.get((e["start"], e["end"]), [])
         if exact:
             return exact
         return [l for l in lessons if l["start"] < e["end"] and e["start"] < l["end"]]
 
+    for e in events:
+        if is_message(e):
+            text = " ".join([e["title"], e["location"], e.get("desc", "")])
+            relevance, reason, codes, named = judge_message(text, my_teachers, my_classes)
+            e["kind"], e["relevance"], e["reason"] = "message", relevance, reason
+            # A shown cancellation strikes through the lessons it cancels: those of the named
+            # teachers, or all of them when only the class is named.
+            if relevance == "show" and CANCEL_ANY_RE.search(text) and not e["allDay"]:
+                for l in overlapping_lessons(e):
+                    if (codes and l["teacher"] in codes) or (not named and reason == "your class"):
+                        l["cancelled"] = True
+                        l["note"] = l["note"] or "Unterrichtsausfall"
+
     dropped = set()
     for e in events:
-        if e["kind"] in ("lesson",) or e["allDay"]:
+        if e["kind"] in ("lesson", "message") or e["allDay"]:
             continue
         slot = overlapping_lessons(e)
         if e["kind"] == "annotated":
@@ -563,13 +709,13 @@ def mark_school(events):
             else:
                 # A note on the lesson ("fällt aus", room change): it replaces the plain copy.
                 e["kind"] = "lesson"
-                e["cancelled"] = bool(CANCEL_RE.search(e["title"]))
+                e["cancelled"] = bool(CANCEL_ANY_RE.search(e["title"]))
                 for l in same:
                     dropped.add(l["id"])
                     if not e["location"]:
                         e["location"] = l["location"]
         elif e["kind"] == "event" and slot and not NOT_EXAM_RE.search(e["title"]):
-            # Same slot as a lesson, different name: the lesson's exam ("lesson shows up twice").
+            # Same slot as a lesson, different short name: the lesson's exam ("lesson shows up twice").
             if len(slot) == 1 or any(l["start"] == e["start"] and l["end"] == e["end"] for l in slot):
                 lesson = next((l for l in slot if l["start"] == e["start"] and l["end"] == e["end"]), slot[0])
                 e["kind"], e["code"], e["teacher"], e["note"] = "test", lesson["code"], lesson["teacher"], e["title"]

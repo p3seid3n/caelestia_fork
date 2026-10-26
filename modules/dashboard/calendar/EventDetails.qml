@@ -107,7 +107,12 @@ ColumnLayout {
 
         Fact {
             icon: "notes"
-            text: root.event?.kind === "lesson" ? (root.event?.note ?? "") : ""
+            text: root.event?.kind === "lesson" ? (root.event?.note ?? "") : root.event?.kind === "message" ? String(root.event?.desc ?? "").replace(/\s+/g, " ") : ""
+        }
+
+        Fact {
+            icon: "filter_alt"
+            text: root.event?.kind === "message" ? Tr.tr("Shown because it concerns %1").arg(root.event.reason) : ""
         }
 
         Fact {

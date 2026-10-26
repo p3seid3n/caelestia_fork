@@ -10,7 +10,9 @@ import qs.services
 
 // The week as a timetable: lessons in their subject's colours, exams outlined in red, cancelled
 // lessons struck through, other calendars' events tinted with their calendar colour and timed
-// homework as small pills. Clicking an empty slot asks for a new entry at that time (rounded to a
+// homework as small pills. School notices that concern the student sit in the all-day row, so
+// they never cover the lessons; a "?" on a day says that notices were left out there because it
+// was not clear whether they matter (see the day's agenda). Clicking an empty slot asks for a new entry at that time (rounded to a
 // quarter hour); a ghost block shows where it would go. Changing week slides like the month grid.
 Item {
     id: root
@@ -40,7 +42,7 @@ Item {
         let last = 18;
         for (const d of days) {
             for (const e of Calendars.eventsOn(d)) {
-                if (e.allDay)
+                if (e.allDay || e.kind === "message")
                     continue;
                 const s = new Date(Math.max(e.start, d.getTime()));
                 const end = new Date(Math.min(e.end, d.getTime() + 86400000 - 1));
@@ -71,7 +73,7 @@ Item {
     function layoutDay(day: date): var {
         const items = [];
         for (const e of Calendars.eventsOn(day)) {
-            if (!e.allDay)
+            if (!e.allDay && e.kind !== "message")
                 items.push({
                     kind: e.kind,
                     start: Math.max(e.start, day.getTime()),
@@ -208,6 +210,27 @@ Item {
                         onClicked: root.dayPicked(head.modelData)
                     }
 
+                    // Notices left out because it was unclear whether they matter.
+                    StyledRect {
+                        readonly property int unsure: Calendars.hiddenOn(head.modelData).filter(e => e.relevance === "unsure").length
+
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.rightMargin: Tokens.padding.small
+                        visible: unsure > 0
+                        implicitWidth: 16
+                        implicitHeight: 16
+                        radius: Tokens.rounding.full
+                        color: Colours.palette.m3tertiaryContainer
+
+                        StyledText {
+                            anchors.centerIn: parent
+                            text: "?"
+                            font: Tokens.font.body.builders.small.weight(Font.Bold).build()
+                            color: Colours.palette.m3onTertiaryContainer
+                        }
+                    }
+
                     Column {
                         anchors.centerIn: parent
 
@@ -241,7 +264,7 @@ Item {
         Row {
             id: allDayRow
 
-            readonly property bool any: root.days.some(d => Calendars.eventsOn(d).some(e => e.allDay) || Assignments.on(d).some(t => !t.hasTime))
+            readonly property bool any: root.days.some(d => Calendars.eventsOn(d).some(e => e.allDay || e.kind === "message") || Assignments.on(d).some(t => !t.hasTime))
 
             Layout.fillWidth: true
             visible: any
@@ -261,7 +284,7 @@ Item {
                     id: allDayCol
 
                     required property date modelData
-                    readonly property var items: Calendars.eventsOn(modelData).filter(e => e.allDay).map(e => ({
+                    readonly property var items: Calendars.eventsOn(modelData).filter(e => e.allDay || e.kind === "message").map(e => ({
                                 event: e,
                                 task: null
                             })).concat(Assignments.on(modelData).filter(t => !t.hasTime).map(t => ({
