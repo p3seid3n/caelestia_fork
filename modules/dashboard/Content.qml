@@ -24,24 +24,28 @@ Item {
     readonly property var tabDefs: ({
             calendar: {
                 component: calendarComponent,
+                keepAlive: true,
                 iconName: "calendar_month",
                 text: Tr.tr("Calendar"),
                 enabled: true
             },
             todo: {
                 component: todoComponent,
+                keepAlive: true,
                 iconName: "checklist",
                 text: Tr.tr("To-do"),
                 enabled: true
             },
             home: {
                 component: homeComponent,
+                keepAlive: true,
                 iconName: "home",
                 text: Tr.tr("Home"),
                 enabled: true
             },
             dashboard: {
                 component: boardComponent,
+                keepAlive: true,
                 iconName: "dashboard",
                 text: Tr.tr("Dashboard"),
                 enabled: Config.dashboard.showDashboard
@@ -192,18 +196,27 @@ Item {
 
                         required property int index
                         required property var modelData
-
-                        Layout.alignment: Qt.AlignTop
-
-                        sourceComponent: modelData.component
-
-                        Component.onCompleted: active = Qt.binding(() => {
+                        // Whether the pane is on screen (or being swiped in).
+                        readonly property bool inView: {
                             if (index === view.currentIndex)
                                 return true;
                             const vx = Math.floor(view.visibleArea.xPosition * view.contentWidth);
                             const vex = Math.floor(vx + view.visibleArea.widthRatio * view.contentWidth);
                             return (vx >= x && vx <= x + implicitWidth) || (vex >= x && vex <= x + implicitWidth);
-                        })
+                        }
+                        // KairosOS: a tab built once stays built (switching back is instant); off
+                        // screen it is fully transparent, which the renderer skips.
+                        property bool built
+
+                        Layout.alignment: Qt.AlignTop
+
+                        sourceComponent: modelData.component
+
+                        opacity: inView ? 1 : 0
+                        onLoaded: built = true
+                        // Light tabs stay; tabs that keep working in the background (media
+                        // visualiser, performance graphs) go when the dashboard closes, as before.
+                        Component.onCompleted: active = Qt.binding(() => (built && (modelData.keepAlive ?? false)) || (inView && (root.screenState.dashboard || (modelData.keepAlive ?? false))))
                     }
                 }
             }

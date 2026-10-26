@@ -72,7 +72,10 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
 
-        active: root.shouldBeActive || root.visible
+        // KairosOS: built once in the background at shell start and kept, so opening the
+        // dashboard only slides it in instead of building every tab again each time.
+        active: Config.dashboard.enabled
+        asynchronous: true
 
         sourceComponent: Content {
             screenState: root.screenState
