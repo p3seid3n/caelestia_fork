@@ -68,6 +68,10 @@ StyledClippingRect {
     implicitWidth: Tokens.sizes.bar.innerWidth
     implicitHeight: workspaces.layoutHeight + workspaces.anchors.margins * 2
 
+    // Drop targets for Super + drag (modules/windowdrag).
+    Component.onCompleted: WindowDrag.register(screen.name, root)
+    Component.onDestruction: WindowDrag.unregister(screen.name, root)
+
     color: Colours.tPalette.m3surfaceContainer
     radius: Tokens.rounding.full
 

@@ -97,6 +97,20 @@ PageBase {
         }
 
         SectionHeader {
+            text: Tr.tr("Moving windows")
+        }
+
+        ToggleRow {
+            first: true
+            last: true
+            text: Tr.tr("Preview while dragging")
+            subtext: WindowLayout.lua ? Tr.tr("Super + drag shrinks the window to a preview and outlines where it lands; drop it on a workspace in the bar to move it there, or hold it over one to switch") : Tr.tr("Needs a Lua Hyprland config")
+            disabled: !WindowLayout.lua
+            checked: WindowLayout.dragPreview
+            onToggled: WindowLayout.setOption("dragPreview", checked)
+        }
+
+        SectionHeader {
             text: Tr.tr("Special workspaces")
         }
 

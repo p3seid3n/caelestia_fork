@@ -38,6 +38,9 @@ Singleton {
     property bool resizeOnEdges: true
     // Clicking a window behind an open special workspace (music, communication, ...) hides it.
     property bool dismissSpecial: true
+    // Super + drag shrinks the window to a preview, shows where it lands and lets it be dropped on
+    // a workspace in the bar (services/WindowDrag.qml, modules/windowdrag).
+    property bool dragPreview: true
 
     // Gaps and borders; only applied while `customGaps` is on, otherwise the Hyprland config rules.
     property bool customGaps: false
@@ -165,6 +168,9 @@ Singleton {
     //   - Focusing a floating window (keyboard, launcher, taskbar) raises it above the others.
     //   - While a special workspace is open on top, clicking a window behind it hides the special
     //     workspace and brings that window forward, instead of the click doing nothing.
+    //   - Super + drag (dragPreview): Hyprland still moves the window, but the shell is told where
+    //     the drag starts, goes and ends (socket2 events "custom>>kairosdrag:..."), hides the real
+    //     window while it is carried and shows a preview instead (services/WindowDrag.qml).
     function applyRuntime(): void {
         if (available && loaded && lua)
             luaEval(runtimeLua());
@@ -261,8 +267,118 @@ Singleton {
             hl.dispatch(hl.dsp.focus({ window = hit }))
             KAIROS.focused(hit)
         end
+        KAIROS.emit = function(s)
+            hl.dispatch(hl.dsp.event("kairosdrag:" .. s))
+        end
+        KAIROS.under = function()
+            local p = hl.get_cursor_pos()
+            local m = hl.get_monitor_at_cursor()
+            if p == nil or m == nil then return nil end
+            local pools = {}
+            local sp = hl.get_active_special_workspace(m)
+            if sp ~= nil then pools[#pools + 1] = sp end
+            if m.active_workspace ~= nil then pools[#pools + 1] = m.active_workspace end
+            local a = hl.get_active_window()
+            for _, ws in ipairs(pools) do
+                local best = nil
+                for _, w in ipairs(ws:get_windows()) do
+                    if KAIROS.inside(w, p) then
+                        if a ~= nil and w.address == a.address then return w end
+                        if best == nil or (w.floating and not best.floating) then best = w end
+                    end
+                end
+                if best ~= nil then return best end
+            end
+            return nil
+        end
+        KAIROS.hide = function(addr)
+            KAIROS.hidden = addr
+            hl.dispatch(hl.dsp.window.set_prop({ prop = "opacity", value = "0", window = "address:" .. addr }))
+        end
+        KAIROS.show = function(addr)
+            if KAIROS.hidden == addr then KAIROS.hidden = nil end
+            hl.dispatch(hl.dsp.window.set_prop({ prop = "opacity", value = "unset", window = "address:" .. addr }))
+        end
+        KAIROS.dragStart = function(w)
+            if w == nil or w.fullscreen ~= 0 then return end
+            local p = hl.get_cursor_pos()
+            if p == nil then return end
+            local ws = w.workspace
+            local x, y = math.floor(p.x), math.floor(p.y)
+            KAIROS.drag = { on = true, addr = w.address, lx = x, ly = y, ticks = 0 }
+            KAIROS.emit(string.format("start,%s,%d,%d,%d,%d,%d,%d,%d,%d", w.address, w.floating and 1 or 0,
+                math.floor(w.at.x), math.floor(w.at.y), math.floor(w.size.x), math.floor(w.size.y), x, y,
+                ws ~= nil and math.floor(ws.id) or 0))
+            if KAIROS.dragTimer == nil then
+                KAIROS.dragTimer = hl.timer(function() pcall(KAIROS.dragTick) end, { timeout = 16, type = "repeat" })
+            else
+                KAIROS.dragTimer:set_enabled(true)
+            end
+        end
+        KAIROS.dragTick = function()
+            local d = KAIROS.drag
+            if d == nil or not d.on then
+                if KAIROS.dragTimer ~= nil then KAIROS.dragTimer:set_enabled(false) end
+                return
+            end
+            d.ticks = d.ticks + 1
+            if d.ticks > 3750 then KAIROS.dragEnd() return end
+            local p = hl.get_cursor_pos()
+            if p == nil then return end
+            local x, y = math.floor(p.x), math.floor(p.y)
+            if x ~= d.lx or y ~= d.ly then
+                d.lx, d.ly = x, y
+                KAIROS.emit("move," .. x .. "," .. y)
+            end
+        end
+        KAIROS.dragEnd = function()
+            local d = KAIROS.drag
+            if d == nil or not d.on then return end
+            d.on = false
+            if KAIROS.dragTimer ~= nil then KAIROS.dragTimer:set_enabled(false) end
+            local p = hl.get_cursor_pos() or { x = d.lx, y = d.ly }
+            local w = hl.get_window("address:" .. d.addr)
+            local wsid = 0
+            if w ~= nil and w.workspace ~= nil then wsid = math.floor(w.workspace.id) end
+            KAIROS.emit(string.format("end,%d,%d,%d", math.floor(p.x), math.floor(p.y), wsid))
+            local addr = d.addr
+            hl.timer(function() if KAIROS.hidden == addr then pcall(KAIROS.show, addr) end end, { timeout = 1500, type = "oneshot" })
+        end
+        KAIROS.dragFinish = function(addr, ws, x, y)
+            local sel = "address:" .. addr
+            if x ~= nil then hl.dispatch(hl.dsp.window.move({ window = sel, x = x, y = y, relative = false })) end
+            if ws ~= nil and ws ~= "" then hl.dispatch(hl.dsp.window.move({ window = sel, workspace = ws, follow = false })) end
+            KAIROS.show(addr)
+        end
+        KAIROS.dragBind = KAIROS.dragBind or function()
+            local before = nil
+            if not (KAIROS.drag ~= nil and KAIROS.drag.on) then
+                local ok, w = pcall(KAIROS.under)
+                if ok then before = w end
+            end
+            local r = hl.dispatch(hl.dsp.window.drag())
+            if KAIROS.drag ~= nil and KAIROS.drag.on then
+                pcall(KAIROS.dragEnd)
+            elseif before ~= nil then
+                pcall(KAIROS.dragStart, before)
+            end
+            return r
+        end
+        KAIROS.dragWanted = ${dragPreview}
+        if KAIROS.dragWanted and not KAIROS.dragBound then
+            pcall(hl.unbind, "SUPER + mouse:272")
+            pcall(hl.bind, "SUPER + mouse:272", KAIROS.dragBind, { mouse = true })
+            KAIROS.dragBound = true
+        elseif not KAIROS.dragWanted and KAIROS.dragBound then
+            pcall(hl.unbind, "SUPER + mouse:272")
+            pcall(hl.bind, "SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
+            KAIROS.dragBound = false
+        end
         if KAIROS.hooked == nil then
             KAIROS.hooked = true
+            pcall(hl.bind, "mouse:272", function()
+                hl.timer(function() if KAIROS.drag ~= nil and KAIROS.drag.on then pcall(KAIROS.dragEnd) end end, { timeout = 80, type = "oneshot" })
+            end, { release = true, non_consuming = true, ignore_mods = true })
             pcall(hl.on, "window.open", function(w) pcall(KAIROS.opened, w) end)
             pcall(hl.on, "window.active", function(w) pcall(KAIROS.focused, w) end)
             pcall(hl.bind, "mouse:272", function() pcall(KAIROS.clicked) end, { non_consuming = true })
@@ -503,6 +619,7 @@ Singleton {
                 snap: root.snap,
                 resizeOnEdges: root.resizeOnEdges,
                 dismissSpecial: root.dismissSpecial,
+                dragPreview: root.dragPreview,
                 customGaps: root.customGaps,
                 gapsIn: root.gapsIn,
                 gapsOut: root.gapsOut,
@@ -527,6 +644,7 @@ Singleton {
                 root.snap = c.snap !== false;
                 root.resizeOnEdges = c.resizeOnEdges !== false;
                 root.dismissSpecial = c.dismissSpecial !== false;
+                root.dragPreview = c.dragPreview !== false;
                 root.customGaps = c.customGaps === true;
                 root.gapsIn = int(c.gapsIn, 0, 60, root.gapsIn);
                 root.gapsOut = int(c.gapsOut, 0, 80, root.gapsOut);

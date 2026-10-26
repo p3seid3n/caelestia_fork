@@ -12,6 +12,7 @@ import qs.components
 import qs.components.containers
 import qs.services
 import qs.modules.bar
+import qs.modules.windowdrag as DragUi
 
 StyledWindow {
     id: root
@@ -318,6 +319,12 @@ StyledWindow {
 
             fullscreen: root.hasFullscreen
         }
+    }
+
+    // Super + drag: window preview, landing outline, workspace drop targets.
+    DragUi.DragOverlay {
+        z: 100
+        screen: root.screen
     }
 
     ShellState.ComponentRef {

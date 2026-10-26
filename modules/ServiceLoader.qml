@@ -17,6 +17,7 @@ Scope {
         // KairosOS: window and display settings are applied at start; the dashboard's data is
         // ready before it first opens.
         WindowLayout;
+        WindowDrag;
         Displays;
         NotifCentre;
         DashboardLayout;
