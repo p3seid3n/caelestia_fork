@@ -35,7 +35,7 @@ QtObject {
     readonly property Timer timeStrTimer: Timer {
         running: !notif.closed
         repeat: true
-        interval: 5000
+        interval: 30000 // the text only changes per minute
         onTriggered: notif.updateTimeStr()
     }
 

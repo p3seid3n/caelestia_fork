@@ -62,7 +62,8 @@ Item {
 
     Timer {
         running: Config.dashboard.enabled && !root.warm
-        interval: 2500
+        // After the login fade-in (modules/Handoff.qml), so building it never stutters that.
+        interval: 5000
         onTriggered: root.warm = true
     }
 
@@ -80,7 +81,7 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
 
-        // KairosOS: built once shortly after shell start (or on first open, if that comes
+        // KairosOS: built once a few seconds after shell start (or on first open, if that comes
         // earlier) and kept, so opening the dashboard only slides it in instead of building every
         // tab again each time. Not asynchronous: the tab Repeaters inside do not report their
         // items reliably when incubated asynchronously, which left the dashboard empty.

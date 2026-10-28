@@ -14,6 +14,8 @@ import qs.services
 // they never cover the lessons; a "?" on a day says that notices were left out there because it
 // was not clear whether they matter (see the day's agenda). Clicking an empty slot asks for a new entry at that time (rounded to a
 // quarter hour); a ghost block shows where it would go. Changing week slides like the month grid.
+// The hours shown are only those the week uses (at least eight), stretched to fill the frame, so
+// the whole week is visible at once and the mouse wheel always changes the week.
 Item {
     id: root
 
@@ -26,7 +28,8 @@ Item {
     property real animOpacity: 1
 
     readonly property real gutter: 40
-    readonly property real hourHeight: 44
+    // Fills the available height; only a week reaching far into the night gets a scroll bar.
+    readonly property real hourHeight: Math.max(24, flick.height / Math.max(1, lastHour - firstHour))
     readonly property var allDays: Array.from({
         length: 7
     }, (_, i) => new Date(shownWeek.getFullYear(), shownWeek.getMonth(), shownWeek.getDate() + i))
@@ -36,10 +39,11 @@ Item {
         return weekendFree ? allDays.filter(d => d.getDay() !== 0 && d.getDay() !== 6) : allDays;
     }
     readonly property real dayWidth: (width - gutter) / Math.max(1, days.length)
-    // Hours shown: at least 7:00 to 18:00, more when the week needs it.
+    // Hours shown: from the first to the last thing that week (at least eight hours; 7:00 to
+    // 17:00 for an empty week).
     readonly property var range: {
-        let first = 7;
-        let last = 18;
+        let first = 24;
+        let last = 0;
         for (const d of days) {
             for (const e of Calendars.eventsOn(d)) {
                 if (e.allDay || e.kind === "message")
@@ -49,8 +53,28 @@ Item {
                 first = Math.min(first, s.getHours());
                 last = Math.max(last, end.getHours() + (end.getMinutes() > 0 ? 1 : 0));
             }
+            for (const t of Assignments.on(d)) {
+                if (!t.hasTime)
+                    continue;
+                const due = new Date(t.due);
+                first = Math.min(first, due.getHours());
+                last = Math.max(last, due.getHours() + 1);
+            }
         }
-        return [first, Math.min(24, Math.max(last, first + 1))];
+        if (first > last) {
+            first = 7;
+            last = 17;
+        }
+        // Stretch to eight hours, more after than before.
+        while (last - first < 8) {
+            if (last < 24 && (last - first) % 3 !== 2)
+                last++;
+            else if (first > 0)
+                first--;
+            else
+                last++;
+        }
+        return [first, Math.min(24, last)];
     }
     readonly property int firstHour: range[0]
     readonly property int lastHour: range[1]
@@ -122,6 +146,8 @@ Item {
     }
 
     function scrollToFirst(): void {
+        if (!flick.interactive)
+            return;
         let first = 24 * 60;
         for (const d of days)
             for (const it of layoutDay(d))
@@ -351,6 +377,8 @@ Item {
             clip: true
             contentWidth: width
             contentHeight: (root.lastHour - root.firstHour) * root.hourHeight
+            // Not interactive when everything fits: the wheel then changes the week.
+            interactive: contentHeight > height + 1
             boundsBehavior: Flickable.StopAtBounds
 
             // Hour lines and labels
@@ -459,7 +487,11 @@ Item {
 
                     // Now
                     StyledRect {
-                        readonly property real nowY: root.yOf(Time.date.getTime(), column.modelData)
+                        // Moves once a minute (the clock ticks every second).
+                        readonly property real nowY: {
+                            Time.minutes;
+                            return root.yOf(Date.now(), column.modelData);
+                        }
 
                         visible: column.today && nowY >= 0 && nowY <= parent.height
                         y: nowY - 1

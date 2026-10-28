@@ -17,7 +17,9 @@ import qs.services
 // imported .ics files (services/Calendars.qml); homework and exams typed in by hand are in
 // services/Assignments.qml. Scroll to change month or week, middle-click for today.
 //
-// Only what is on screen is built: the month or the week layout, and each sheet once it opens.
+// Month and week are both kept once built (the one not shown is built in the background), so
+// switching is a shared-axis zoom: going to the week zooms in (the month grows and fades, the week
+// grows into place), going back zooms out. Sheets are built when they first open.
 CustomMouseArea {
     id: root
 
@@ -107,19 +109,17 @@ CustomMouseArea {
     acceptedButtons: Qt.MiddleButton
     onClicked: goToday()
 
-    Loader {
-        anchors.fill: parent
-        anchors.margins: Tokens.padding.large
-        active: !root.week
-
+    ViewLoader {
+        shown: !root.week
+        hiddenScale: 1.05
+        asynchronous: root.week
         sourceComponent: monthLayout
     }
 
-    Loader {
-        anchors.fill: parent
-        anchors.margins: Tokens.padding.large
-        active: root.week
-
+    ViewLoader {
+        shown: root.week
+        hiddenScale: 0.95
+        asynchronous: !root.week
         sourceComponent: weekLayout
     }
 
@@ -328,24 +328,121 @@ CustomMouseArea {
         }
     }
 
-    // Month / week
-    component ViewSwitch: RowLayout {
-        spacing: Tokens.spacing.extraSmall
+    // One of the two views; the other one fades and zooms away.
+    component ViewLoader: Loader {
+        required property bool shown
+        required property real hiddenScale
 
-        IconTextButton {
-            type: IconTextButton.Tonal
-            checked: !root.week
-            icon: "calendar_view_month"
-            text: Tr.tr("Month")
-            onClicked: Calendars.view = "month"
+        anchors.fill: parent
+        anchors.margins: Tokens.padding.large
+        opacity: shown ? 1 : 0
+        scale: shown ? 1 : hiddenScale
+        visible: opacity > 0
+        enabled: shown
+
+        Behavior on opacity {
+            Anim {
+                type: Anim.DefaultEffects
+            }
         }
 
-        IconTextButton {
-            type: IconTextButton.Tonal
-            checked: root.week
-            icon: "calendar_view_week"
-            text: Tr.tr("Week")
-            onClicked: Calendars.view = "week"
+        Behavior on scale {
+            Anim {
+                type: Anim.DefaultSpatial
+            }
+        }
+    }
+
+    // Month / week as one segmented button; the selection slides between the halves.
+    component ViewSwitch: StyledRect {
+        id: viewSwitch
+
+        implicitWidth: monthSeg.implicitWidth + weekSeg.implicitWidth + Tokens.padding.extraSmall * 2
+        implicitHeight: Math.max(monthSeg.implicitHeight, weekSeg.implicitHeight) + Tokens.padding.extraSmall * 2
+        radius: Tokens.rounding.full
+        color: Colours.tPalette.m3surfaceContainerHigh
+
+        StyledRect {
+            x: Tokens.padding.extraSmall + (root.week ? monthSeg.width : 0)
+            y: Tokens.padding.extraSmall
+            width: root.week ? weekSeg.width : monthSeg.width
+            height: parent.height - Tokens.padding.extraSmall * 2
+            radius: Tokens.rounding.full
+            color: Colours.palette.m3secondaryContainer
+
+            Behavior on x {
+                Anim {
+                    type: Anim.FastSpatial
+                }
+            }
+
+            Behavior on width {
+                Anim {
+                    type: Anim.FastSpatial
+                }
+            }
+        }
+
+        Row {
+            anchors.centerIn: parent
+
+            Segment {
+                id: monthSeg
+
+                icon: "calendar_view_month"
+                text: Tr.tr("Month")
+                selected: !root.week
+                onClicked: Calendars.view = "month"
+            }
+
+            Segment {
+                id: weekSeg
+
+                icon: "calendar_view_week"
+                text: Tr.tr("Week")
+                selected: root.week
+                onClicked: Calendars.view = "week"
+            }
+        }
+    }
+
+    component Segment: Item {
+        id: segment
+
+        property string icon
+        property string text
+        property bool selected
+
+        signal clicked
+
+        implicitWidth: segRow.implicitWidth + Tokens.padding.large * 2
+        implicitHeight: segRow.implicitHeight + Tokens.padding.small * 2
+
+        StateLayer {
+            radius: Tokens.rounding.full
+            onClicked: segment.clicked()
+        }
+
+        Row {
+            id: segRow
+
+            anchors.centerIn: parent
+            spacing: Tokens.spacing.small
+
+            MaterialIcon {
+                anchors.verticalCenter: parent.verticalCenter
+                text: segment.icon
+                fill: segment.selected ? 1 : 0
+                color: segment.selected ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
+                fontStyle: Tokens.font.icon.small
+            }
+
+            StyledText {
+                anchors.verticalCenter: parent.verticalCenter
+                text: segment.text
+                font: Tokens.font.body.builders.small.weight(Font.Medium).build()
+                color: segment.selected ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
+            }
         }
     }
 }

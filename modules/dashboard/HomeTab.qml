@@ -22,6 +22,8 @@ Item {
     property bool picking // device gallery open (only while editing)
     // Read by Content.qml: keyboard focus while there is something to type into.
     readonly property bool wantsInput: !HomeAssistant.connected || editing
+    // On screen: the dashboard is open on this tab (other tabs are kept, but transparent).
+    readonly property bool onScreen: screenState.dashboard && (parent?.opacity ?? 1) > 0
 
     // The gallery needs room, however few tiles there are.
     implicitWidth: 840
@@ -31,7 +33,16 @@ Item {
         picking = false;
         detail.open = false;
     }
-    Component.onCompleted: HomeAssistant.refresh()
+    onOnScreenChanged: HomeAssistant.viewers += onScreen ? 1 : -1
+    Component.onCompleted: {
+        HomeAssistant.refresh();
+        if (onScreen)
+            HomeAssistant.viewers++;
+    }
+    Component.onDestruction: {
+        if (onScreen)
+            HomeAssistant.viewers--;
+    }
 
     Behavior on implicitHeight {
         Anim {}

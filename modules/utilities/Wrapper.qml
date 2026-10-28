@@ -4,7 +4,10 @@ import QtQuick
 import Quickshell
 import Caelestia
 import Caelestia.Config
+import Caelestia.I18n
 import qs.components
+import qs.components.filedialog
+import qs.services
 import qs.modules.sidebar as Sidebar
 import qs.modules.bar.popouts as BarPopouts
 
@@ -23,6 +26,11 @@ Item {
         property string recordingMode
 
         reloadableId: "utilities"
+    }
+    // Super devices → Send file. Lives here so it survives the panel closing.
+    readonly property FileDialog sharePicker: FileDialog {
+        title: Tr.tr("Send a file to your phone")
+        onAccepted: path => PhoneLink.share(PhoneLink.shareTarget, path)
     }
     readonly property bool shouldBeActive: screenState.sidebar || (screenState.utilities && Config.utilities.enabled && !(screenState.session && Config.session.enabled))
     readonly property real totalPadding: content.anchors.margins + CUtils.clamp(content.anchors.margins - Config.border.thickness, 0, content.anchors.margins)
@@ -68,6 +76,14 @@ Item {
 
     Behavior on offsetScale {
         Anim {}
+    }
+
+    Connections {
+        function onShareRequested(): void {
+            root.sharePicker.open();
+        }
+
+        target: PhoneLink
     }
 
     Loader {

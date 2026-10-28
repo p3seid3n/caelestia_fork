@@ -12,7 +12,8 @@ import qs.services
 
 // The chosen day's itinerary (right half of the Calendar tab's month view): exams first, then
 // homework and reminders (tick them off right here), school notices that concern the student,
-// other events, the day's lessons in one compact list, the notices that were left out (unsure
+// other events, the day's lessons as pills in their subject's colour (as in the week view), the
+// notices that were left out (unsure
 // ones first, each with the reason; folded until asked for), and finally what is coming up.
 ColumnLayout {
     id: root
@@ -177,7 +178,7 @@ ColumnLayout {
             implicitHeight: {
                 switch (kind) {
                 case "l":
-                    return 30;
+                    return 42;
                 case "lh":
                 case "uh":
                     return 30;
@@ -304,53 +305,85 @@ ColumnLayout {
                 }
             }
 
-            // Lesson: one compact line
-            RowLayout {
+            // Lesson: a pill in the subject's colour, like the blocks in the week view.
+            StyledRect {
+                id: lesson
+
+                readonly property string subject: row.event?.subject ?? ""
+                readonly property color onColour: subject ? Subjects.onContainerOf(subject) : Colours.palette.m3onSecondaryContainer
+
                 anchors.fill: parent
-                anchors.leftMargin: Tokens.padding.small
-                anchors.rightMargin: Tokens.padding.small
+                anchors.topMargin: 1
+                anchors.bottomMargin: 1
                 visible: row.kind === "l" && row.event !== null
-                spacing: Tokens.spacing.small
+                radius: Tokens.rounding.full
+                color: subject ? Subjects.containerOf(subject) : Colours.palette.m3secondaryContainer
                 opacity: row.event?.cancelled ? 0.5 : 1
 
-                StyledText {
-                    Layout.preferredWidth: 44
-                    text: row.event ? root.clock(row.event.start) : ""
-                    font: Tokens.font.body.small
-                    color: Colours.palette.m3onSurfaceVariant
+                StateLayer {
+                    radius: parent.radius
+                    color: lesson.onColour
+                    onClicked: root.eventPicked(row.event)
                 }
 
-                StyledRect {
-                    implicitWidth: 8
-                    implicitHeight: 8
-                    radius: Tokens.rounding.full
-                    color: row.event ? Calendars.accentOf(row.event) : "transparent"
-                }
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Tokens.padding.small
+                    anchors.rightMargin: Tokens.padding.small
+                    spacing: Tokens.spacing.small
 
-                StyledText {
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    text: row.event ? Calendars.titleOf(row.event) + (row.event.cancelled ? " · " + Tr.tr("cancelled") : "") : ""
-                    font: {
-                        const f = Tokens.font.body.builders.medium.build();
-                        f.strikeout = row.event?.cancelled ?? false;
-                        return f;
+                    StyledRect {
+                        implicitWidth: 30
+                        implicitHeight: 30
+                        radius: Tokens.rounding.full
+                        color: Qt.alpha(lesson.onColour, 0.12)
+
+                        MaterialIcon {
+                            anchors.centerIn: parent
+                            text: Subjects.subjects[lesson.subject]?.icon ?? "school"
+                            fill: 1
+                            color: lesson.onColour
+                            fontStyle: Tokens.font.icon.small
+                        }
                     }
-                    color: Colours.palette.m3onSurface
-                }
 
-                StyledText {
-                    text: row.event?.location ?? ""
-                    font: Tokens.font.body.small
-                    color: Colours.palette.m3onSurfaceVariant
-                }
-            }
+                    StyledText {
+                        text: row.event ? root.clock(row.event.start) : ""
+                        font: Tokens.font.body.builders.small.weight(Font.Medium).build()
+                        color: lesson.onColour
+                        opacity: 0.8
+                    }
 
-            StateLayer {
-                anchors.fill: parent
-                visible: row.kind === "l"
-                radius: Tokens.rounding.small
-                onClicked: root.eventPicked(row.event)
+                    StyledText {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        text: row.event ? Calendars.titleOf(row.event) + (row.event.cancelled ? " · " + Tr.tr("cancelled") : "") : ""
+                        font: {
+                            const f = Tokens.font.body.builders.medium.weight(Font.DemiBold).build();
+                            f.strikeout = row.event?.cancelled ?? false;
+                            return f;
+                        }
+                        color: lesson.onColour
+                    }
+
+                    // Room
+                    StyledRect {
+                        visible: (row.event?.location ?? "") !== ""
+                        implicitWidth: room.implicitWidth + Tokens.padding.medium * 2
+                        implicitHeight: 24
+                        radius: Tokens.rounding.full
+                        color: Qt.alpha(lesson.onColour, 0.12)
+
+                        StyledText {
+                            id: room
+
+                            anchors.centerIn: parent
+                            text: row.event?.location ?? ""
+                            font: Tokens.font.body.small
+                            color: lesson.onColour
+                        }
+                    }
+                }
             }
 
             // Exam, event, homework or upcoming item: a card

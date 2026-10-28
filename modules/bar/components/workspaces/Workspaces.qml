@@ -55,6 +55,20 @@ StyledClippingRect {
 
     property real blur: onSpecial ? 1 : 0
 
+    // Super + drag (modules/windowdrag): the column widens as the dragged window comes near and a
+    // pill slides to the workspace under it, stretching on the way like the active indicator.
+    readonly property bool dragHere: WindowDrag.carrying && WindowDrag.screen === screen
+    property real dropNear: dragHere ? Math.max(0, Math.min(1, 1 - (WindowDrag.cursor.x - screen.x - WindowDrag.barRight) / 260)) : 0
+    readonly property real dropGrow: Math.min(14, Math.max(0, Config.border.thickness * 2 - 4)) * dropNear
+    readonly property Item dropItem: {
+        workspaces.itemsDirty;
+        const genie = WindowDrag.phase === "genie" && WindowDrag.dropScreen === screen;
+        const sel = genie ? WindowDrag.dropWs : dragHere ? WindowDrag.hoverWs : "";
+        if (sel === "")
+            return null;
+        return root.workspaces.find(w => w && String((w as Workspace).ws) === sel) ?? null;
+    }
+
     function workspaceIndex(id: int): int {
         if (!Config.bar.workspaces.showUnoccupied)
             return wsIds.indexOf(id);
@@ -65,15 +79,24 @@ StyledClippingRect {
         return index % shown;
     }
 
-    implicitWidth: Tokens.sizes.bar.innerWidth
+    implicitWidth: Tokens.sizes.bar.innerWidth + dropGrow
     implicitHeight: workspaces.layoutHeight + workspaces.anchors.margins * 2
 
     // Drop targets for Super + drag (modules/windowdrag).
     Component.onCompleted: WindowDrag.register(screen.name, root)
     Component.onDestruction: WindowDrag.unregister(screen.name, root)
 
-    color: Colours.tPalette.m3surfaceContainer
+    color: dropNear > 0 ? Colours.tPalette.m3surfaceContainerHigh : Colours.tPalette.m3surfaceContainer
     radius: Tokens.rounding.full
+
+    // Follows the cursor while dragging, eases back after the drop.
+    Behavior on dropNear {
+        enabled: !root.dragHere
+
+        Anim {
+            type: Anim.Emphasized
+        }
+    }
 
     Item {
         anchors.fill: parent
@@ -106,6 +129,12 @@ StyledClippingRect {
                     type: Anim.DefaultEffects
                 }
             }
+        }
+
+        DropPill {
+            id: dropPill
+
+            anchors.horizontalCenter: parent.horizontalCenter
         }
 
         LazyListView {
@@ -243,5 +272,104 @@ StyledClippingRect {
 
     Behavior on implicitHeight {
         Anim {}
+    }
+
+    // The drop target pill: inverted, slides between workspaces (leading edge first, the trailing
+    // edge catches up, as on the active workspace indicator) and fills while held to switch.
+    component DropPill: StyledRect {
+        id: pill
+
+        readonly property Workspace target: root.dropItem as Workspace
+        readonly property real size: Tokens.sizes.bar.innerWidth - Tokens.padding.small + 8
+        property real start
+        property real end
+        property bool placed
+
+        function centreOf(w: Workspace): real {
+            return workspaces.y + w.LazyListView.layoutY + w.indicatorSize / 2;
+        }
+
+        function runAnim(): void {
+            if (!target) {
+                placed = false;
+                return;
+            }
+            const c = centreOf(target);
+            const newStart = c - size / 2;
+            startAnim.stop();
+            endAnim.stop();
+            if (!placed) {
+                start = newStart;
+                end = newStart + size;
+                placed = true;
+            } else {
+                const goingUp = newStart < start;
+                const lead = Tokens.anim.durations.expressiveFastSpatial;
+                const trail = lead * 1.6;
+                startAnim.to = newStart;
+                endAnim.to = newStart + size;
+                startAnim.duration = goingUp ? lead : trail;
+                endAnim.duration = goingUp ? trail : lead;
+                startAnim.start();
+                endAnim.start();
+            }
+            fill.scale = 0;
+            if (WindowDrag.carrying && !target.focused)
+                fillAnim.restart();
+            else
+                fillAnim.stop();
+        }
+
+        onTargetChanged: runAnim()
+
+        y: start
+        implicitWidth: Math.min(parent.width - Tokens.padding.extraSmall, size + root.dropGrow)
+        implicitHeight: end - start
+        radius: Tokens.rounding.full
+        color: Colours.palette.m3onSurface
+        opacity: target ? 1 : 0
+
+        Behavior on opacity {
+            Anim {
+                type: Anim.FastEffects
+            }
+        }
+
+        Anim on start {
+            id: startAnim
+        }
+
+        Anim on end {
+            id: endAnim
+        }
+
+        Connections {
+            function onLayoutYChanged(): void {
+                pill.runAnim();
+            }
+
+            target: pill.target?.LazyListView ?? null
+        }
+
+        // Fills while held: when full, that workspace opens (services/WindowDrag.qml).
+        StyledRect {
+            id: fill
+
+            anchors.fill: parent
+            radius: Tokens.rounding.full
+            color: Colours.palette.m3primary
+            opacity: 0.85
+        }
+
+        NumberAnimation {
+            id: fillAnim
+
+            target: fill
+            property: "scale"
+            from: 0
+            to: 1
+            duration: 650
+            easing.type: Easing.OutCubic
+        }
     }
 }

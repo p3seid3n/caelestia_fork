@@ -3,16 +3,20 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
+import Caelestia.Config
 
 // Super + drag with a preview (Lua configs; see WindowLayout.runtimeLua and modules/windowdrag).
 //
 // Hyprland keeps doing the actual move, so the layout behaves exactly like a normal drag (tiled
 // windows step out of the layout and the others close the gap). The Lua side reports the drag
 // over socket2 ("custom>>kairosdrag:start|move|end,...") and the shell:
-//   1. takes one still frame of the window, then hides the real window (opacity 0), so only a
-//      small preview follows the cursor - nothing large is redrawn while dragging,
-//   2. draws an outline where the window will land (the free half of the tiled window under the
-//      cursor, or the floating window's new spot),
+//   1. takes one still frame of the window.
+//      Floating windows: the real window is moved as usual; only when it comes near the bar's
+//      workspaces is it swapped for that frame, which shrinks around the grab point to a
+//      thumbnail (and grows back when you move away again).
+//      Tiled windows: the real window is hidden right away and a small preview follows the cursor,
+//   2. tiled windows only: an outline shows where the window will land (the free half of the
+//      tiled window under the cursor),
 //   3. turns the bar's workspaces into drop targets once the preview comes close: they grow,
 //      the one under the preview is inverted, and holding it there for a moment switches to that
 //      workspace (the window comes along),
@@ -26,6 +30,8 @@ Singleton {
     property string phase: "idle"
     readonly property bool active: phase !== "idle"
     readonly property bool carrying: phase === "carry"
+    // Floating windows stay real until they come near the workspaces (see above).
+    readonly property bool floatStyle: floatingAtStart
 
     property string address
     property bool floatingAtStart
@@ -50,8 +56,14 @@ Singleton {
     // Kept while the drop animation plays, even if the cursor moves to another screen.
     property ShellScreen dropScreen: null
 
+    // Right edge of the bar (it sits at the left screen edge), for "how close to the workspaces".
+    readonly property real barRight: Tokens.sizes.bar.innerWidth + Math.max(Tokens.padding.small, GlobalConfig.border.thickness) * 2
+
     // Bar workspace columns, by screen name (registered by bar/components/workspaces/Workspaces.qml).
     property var targets: ({})
+
+    // Right before the drop is handled (the overlay keeps the preview's last spot).
+    signal released
 
     function register(screenName: string, item: Item): void {
         const next = Object.assign({}, targets);
@@ -90,6 +102,14 @@ Singleton {
         WindowLayout.luaEval(`pcall(KAIROS.hide, "${address}")`);
     }
 
+    // Floating windows moved away from the workspaces again: show the real window.
+    function showReal(): void {
+        if (!hidden || address === "")
+            return;
+        hidden = false;
+        WindowLayout.luaEval(`pcall(KAIROS.show, "${address}")`);
+    }
+
     function finish(ws: string, x: var, y: var): void {
         const pos = x === undefined || x === null ? "nil, nil" : `${Math.round(x)}, ${Math.round(y)}`;
         WindowLayout.luaEval(`pcall(KAIROS.dragFinish, "${address}", "${ws}", ${pos})`);
@@ -116,7 +136,8 @@ Singleton {
             hoverWs = "";
             dropScreen = null;
             phase = "carry";
-            hideFallback.restart();
+            if (!floatStyle)
+                hideFallback.restart();
         } else if (kind === "move") {
             if (carrying)
                 cursor = Qt.point(num(1), num(2));
@@ -124,6 +145,7 @@ Singleton {
             if (!carrying)
                 return;
             cursor = Qt.point(num(1), num(2));
+            released();
             hideFallback.stop();
             springTimer.stop();
             dropScreen = screen;
@@ -149,10 +171,19 @@ Singleton {
                 const moved = here > 0 && windowWs !== here;
                 const dx = cursor.x - startCursor.x;
                 const dy = cursor.y - startCursor.y;
+                const wasHidden = hidden;
                 if (moved)
                     finish(String(here), floatingAtStart ? startRect.x + dx : null, startRect.y + dy);
                 else
                     finish("", null, null);
+                if (floatStyle && !wasHidden) {
+                    // A normal floating move: nothing to animate.
+                    hoverWs = "";
+                    phase = "idle";
+                    toplevel = null;
+                    dropScreen = null;
+                    return;
+                }
                 phase = "home";
                 phaseTimer.interval = 260;
             }

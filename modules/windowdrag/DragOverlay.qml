@@ -11,14 +11,17 @@ import qs.services
 import qs.utils
 
 // Drawn over everything on the screen being dragged on (part of the drawers window, which already
-// covers the screen; it takes no input - Hyprland keeps the pointer for the drag).
-//   - The window as a small preview beside the cursor. It collapses out of the real window when
-//     the drag starts; the frame is taken once, so nothing large is redrawn while dragging.
-//   - An outline and fill where the window will land: the half of the tiled window under the
-//     cursor (the other half shows where that window moves to), or the floating window's new spot.
-//   - The bar's own workspace icons become drop targets (bar/components/workspaces/Workspace.qml
-//     grows them like a dock and inverts the one under the cursor; this picks which one).
-//   - Drops: onto a workspace the preview is sucked into it; elsewhere it grows into the outline.
+// covers the screen; it takes no input - Hyprland keeps the pointer for the drag). The window's
+// frame is taken once, so nothing large is redrawn while dragging.
+//   - Floating windows: nothing is drawn while the real window is moved; near the bar's
+//     workspaces the real window is swapped for its frame, which shrinks around the grab point to
+//     a thumbnail as it gets closer (and grows back when moving away).
+//   - Tiled windows: the window collapses into a small preview beside the cursor, and an outline
+//     shows where it will land (the half of the tiled window under the cursor; the other half
+//     shows where that window moves to).
+//   - The bar's own workspace icons are the drop targets (Workspaces.qml / Workspace.qml draw
+//     them; this picks the one level with the cursor).
+//   - Drops: onto a workspace the preview is sucked into it; elsewhere it grows into place.
 Item {
     id: root
 
@@ -35,12 +38,22 @@ Item {
 
     // The bar's workspace column on this screen and its right edge.
     readonly property Item column: WindowDrag.targets[screen.name] ?? null
-    readonly property real barRight: {
-        cx; // follow the cursor (the bar can move when the dashboard or a special workspace opens)
-        return column ? column.mapToItem(root, column.width, 0).x : 0;
-    }
+    readonly property real barRight: WindowDrag.barRight
     // 0 far from the bar's workspaces, 1 right on them.
     readonly property real nearness: carrying && column ? Math.max(0, Math.min(1, 1 - (cx - barRight) / 260)) : 0
+    readonly property bool floatStyle: WindowDrag.floatStyle
+    // Floating windows: how far the window has shrunk towards a thumbnail (eased).
+    readonly property real shrink: {
+        if (!carrying || !floatStyle)
+            return 0;
+        const t = Math.max(0, Math.min(1, (nearness - 0.1) / 0.65));
+        return t * t * (3 - 2 * t);
+    }
+    // Where the cursor holds the window, as a fraction of its size (kept while it shrinks).
+    readonly property real grabU: WindowDrag.startRect.width > 0 ? (WindowDrag.startCursor.x - WindowDrag.startRect.x) / WindowDrag.startRect.width : 0.5
+    readonly property real grabV: WindowDrag.startRect.height > 0 ? (WindowDrag.startCursor.y - WindowDrag.startRect.y) / WindowDrag.startRect.height : 0.1
+    // The preview's spot when the drop happened.
+    property rect releaseRect
 
     readonly property int gapsIn: num(Hypr.options["general:gaps_in"], 5)
     readonly property int windowRadius: num(Hypr.options["decoration:rounding"], Tokens.rounding.medium)
@@ -89,20 +102,12 @@ Item {
             rect: Qt.rect(0, 0, 0, 0),
             other: Qt.rect(0, 0, 0, 0)
         };
-        if (!carrying || WindowDrag.hoverWs !== "")
+        // Floating windows are their own outline.
+        if (!carrying || floatStyle || WindowDrag.hoverWs !== "")
             return none;
 
         const gx = WindowDrag.cursor.x;
         const gy = WindowDrag.cursor.y;
-
-        // Floating: the window moves with the cursor.
-        if (WindowDrag.floatingAtStart) {
-            const r = WindowDrag.startRect;
-            return {
-                rect: Qt.rect(r.x + gx - WindowDrag.startCursor.x - screen.x, r.y + gy - WindowDrag.startCursor.y - screen.y, r.width, r.height),
-                other: none.other
-            };
-        }
 
         // Tiled: Hyprland splits the tiled window under the cursor, on the cursor's side.
         const monitor = Hypr.monitorFor(screen);
@@ -147,33 +152,36 @@ Item {
         };
     }
 
-    // Picks the bar workspace the cursor is level with. The current one is kept until the cursor
-    // is clearly past it, so the icons growing and moving apart never make the choice flicker.
+    // Picks the bar workspace whose icon is nearest to the cursor's height. The icons never move
+    // while dragging (they only grow in place), so this is stable; the current pick is kept until
+    // another icon is clearly nearer.
     function updateHover(): void {
-        if (!carrying || !column || cx > barRight + 90) {
+        const items = carrying && column ? (column.workspaces ?? []).filter(i => i) : [];
+        const zone = cx <= barRight + 150 || shrink > 0.85;
+        if (items.length === 0 || !zone) {
             if (mine && WindowDrag.carrying)
                 WindowDrag.hoverWs = "";
             return;
         }
-        const items = (column.workspaces ?? []).filter(i => i);
-        const spans = items.map(item => {
-            const top = item.mapToItem(root, 0, 0).y;
-            return {
-                item,
-                top,
-                bottom: top + item.height
-            };
-        });
-        const spacing = Tokens.spacing.extraSmall;
-        const current = spans.find(sp => String(sp.item.ws) === WindowDrag.hoverWs);
-        let pick = null;
-        if (current && cy >= current.top - spacing - 6 && cy <= current.bottom + spacing + 6)
-            pick = current;
-        else
-            pick = spans.find(sp => cy >= sp.top - spacing / 2 && cy <= sp.bottom + spacing / 2) ?? null;
-        WindowDrag.hoverWs = pick ? String(pick.item.ws) : "";
-        if (pick)
-            WindowDrag.dropPoint = pick.item.mapToItem(root, pick.item.width / 2, root.iconSize / 2);
+        const centres = items.map(item => ({
+                    item,
+                    y: item.mapToItem(root, 0, root.iconSize / 2).y
+                }));
+        const first = centres[0].y;
+        const last = centres[centres.length - 1].y;
+        if (cy < first - iconSize || cy > last + iconSize) {
+            WindowDrag.hoverWs = "";
+            return;
+        }
+        let best = centres[0];
+        for (const c of centres)
+            if (Math.abs(c.y - cy) < Math.abs(best.y - cy))
+                best = c;
+        const current = centres.find(c => String(c.item.ws) === WindowDrag.hoverWs);
+        if (current && Math.abs(current.y - cy) <= Math.abs(best.y - cy) + 8)
+            best = current;
+        WindowDrag.hoverWs = String(best.item.ws);
+        WindowDrag.dropPoint = best.item.mapToItem(root, best.item.width / 2, root.iconSize / 2);
     }
 
     anchors.fill: parent
@@ -185,8 +193,22 @@ Item {
     }
     onCxChanged: updateHover()
     onCyChanged: updateHover()
+    // Floating windows: swap the real window for its frame near the workspaces and back again.
+    onShrinkChanged: {
+        if (!carrying || !floatStyle)
+            return;
+        if (shrink > 0.03)
+            WindowDrag.hideReal();
+        else if (shrink <= 0.0)
+            WindowDrag.showReal();
+    }
 
     Connections {
+        function onReleased(): void {
+            if (root.mine)
+                root.releaseRect = Qt.rect(preview.x, preview.y, preview.width, preview.height);
+        }
+
         function onPhaseChanged(): void {
             const phase = WindowDrag.phase;
             if (phase === "carry") {
@@ -194,7 +216,11 @@ Item {
                 genieAnim.stop();
                 root.settle = 0;
                 root.genie = 0;
-                collapseAnim.restart();
+                root.lastLanding = Qt.rect(0, 0, 0, 0);
+                if (WindowDrag.floatStyle)
+                    root.collapse = 1;
+                else
+                    collapseAnim.restart();
             } else if (phase === "home") {
                 settleAnim.restart();
             } else if (phase === "genie") {
@@ -253,9 +279,33 @@ Item {
     Item {
         id: preview
 
-        readonly property rect carryRect: root.mixRect(root.startLocal, root.thumb, root.collapse)
-        readonly property rect homeTarget: root.lastLanding.width > 0 ? root.lastLanding : Qt.rect(root.thumb.x - root.thumb.width * 0.1, root.thumb.y - root.thumb.height * 0.1, root.thumb.width * 1.2, root.thumb.height * 1.2)
-        readonly property rect now: root.phase === "home" ? root.mixRect(root.thumb, homeTarget, root.settle) : carryRect
+        // Floating: the window at its real size under the cursor, shrinking around the grab point.
+        readonly property rect floatRect: {
+            const full = root.startLocal;
+            const tw = full.width * root.fit * 0.8;
+            const th = full.height * root.fit * 0.8;
+            const e = root.shrink;
+            const w = root.mix(full.width, tw, e);
+            const h = root.mix(full.height, th, e);
+            return Qt.rect(root.cx - root.grabU * w, root.cy - root.grabV * h, w, h);
+        }
+        readonly property rect fullAtCursor: Qt.rect(root.cx - root.grabU * root.startLocal.width, root.cy - root.grabV * root.startLocal.height, root.startLocal.width, root.startLocal.height)
+        readonly property rect carryRect: root.floatStyle ? floatRect : root.mixRect(root.startLocal, root.thumb, root.collapse)
+        readonly property rect homeTarget: {
+            if (root.floatStyle)
+                return fullAtCursor;
+            if (root.lastLanding.width > 0)
+                return root.lastLanding;
+            const r = root.releaseRect;
+            return Qt.rect(r.x - r.width * 0.1, r.y - r.height * 0.1, r.width * 1.2, r.height * 1.2);
+        }
+        readonly property rect now: {
+            if (root.phase === "carry")
+                return carryRect;
+            if (root.phase === "home")
+                return root.mixRect(root.releaseRect, homeTarget, root.settle);
+            return root.releaseRect;
+        }
         // Genie: squeezed sideways first, then lengthwise, while it flies into the workspace.
         readonly property real squeezeX: 1 - 0.9 * Math.pow(root.genie, 0.6)
         readonly property real squeezeY: 1 - 0.9 * Math.pow(root.genie, 1.6)
@@ -267,13 +317,14 @@ Item {
         width: now.width * squeezeX
         height: now.height * squeezeY
         opacity: root.phase === "home" ? 1 - root.settle : 1 - Math.pow(root.genie, 3)
-        visible: root.mine && width > 1 && height > 1
+        // A floating window is only drawn here while the real one is swapped out.
+        visible: root.mine && width > 1 && height > 1 && (!root.floatStyle || root.phase !== "carry" || WindowDrag.hidden)
 
         Elevation {
             anchors.fill: parent
             radius: card.radius
             level: 4
-            opacity: root.collapse
+            opacity: root.floatStyle ? root.shrink : root.collapse
         }
 
         ClippingRectangle {
@@ -313,7 +364,8 @@ Item {
                     }
 
                     onHasContentChanged: {
-                        if (hasContent)
+                        // Tiled windows give way to the preview as soon as it has the frame.
+                        if (hasContent && !root.floatStyle)
                             WindowDrag.hideReal();
                     }
                     Component.onCompleted: captureFrame()

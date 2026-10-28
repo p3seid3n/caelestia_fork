@@ -11,11 +11,13 @@ import qs.services
 // Controls for one device, picked from what it can do (HomeAssistant.features()).
 // level 1: the main control only (brightness, cover buttons, target temperature, playback).
 // level 2: everything (colour, colour temperature, position, HVAC modes, volume...).
-ColumnLayout {
+// On wide tiles the extra controls sit two per row, so they fit the tile's height.
+GridLayout {
     id: root
 
     required property string entityId
     property int level: 2
+    property bool wide
 
     readonly property var entity: HomeAssistant.byId[entityId] ?? null
     readonly property var attrs: entity?.attributes ?? ({})
@@ -37,7 +39,9 @@ ColumnLayout {
         action();
     }
 
-    spacing: Tokens.spacing.small
+    columns: wide ? 2 : 1
+    columnSpacing: Tokens.spacing.large
+    rowSpacing: Tokens.spacing.small
     visible: level > 0
 
     Timer {
@@ -49,6 +53,7 @@ ColumnLayout {
 
     // --- Light -----------------------------------------------------------------
     ControlRow {
+        Layout.columnSpan: root.wide ? 2 : 1
         visible: root.can.brightness
         icon: "brightness_6"
 
@@ -110,6 +115,7 @@ ColumnLayout {
 
     // --- Cover (blinds, garage) --------------------------------------------------
     RowLayout {
+        Layout.columnSpan: root.wide ? 2 : 1
         visible: root.domain === "cover"
         Layout.fillWidth: true
         spacing: Tokens.spacing.small
@@ -171,6 +177,7 @@ ColumnLayout {
 
     // --- Climate --------------------------------------------------------------
     RowLayout {
+        Layout.columnSpan: root.wide ? 2 : 1
         visible: root.can.climate
         Layout.fillWidth: true
         spacing: Tokens.spacing.small
@@ -214,6 +221,7 @@ ColumnLayout {
     }
 
     Flow {
+        Layout.columnSpan: root.wide ? 2 : 1
         visible: root.level >= 2 && root.can.climate
         Layout.fillWidth: true
         spacing: Tokens.spacing.small
@@ -241,6 +249,7 @@ ColumnLayout {
 
     // --- Media player -----------------------------------------------------------
     StyledText {
+        Layout.columnSpan: root.wide ? 2 : 1
         visible: root.level >= 2 && root.can.media && !!root.attrs.media_title
         Layout.fillWidth: true
         elide: Text.ElideRight
@@ -250,6 +259,7 @@ ColumnLayout {
     }
 
     RowLayout {
+        Layout.columnSpan: root.wide ? 2 : 1
         visible: root.can.media
         Layout.fillWidth: true
         spacing: Tokens.spacing.small
@@ -324,6 +334,7 @@ ColumnLayout {
 
     // --- Lock -----------------------------------------------------------------
     TextButton {
+        Layout.columnSpan: root.wide ? 2 : 1
         visible: root.domain === "lock"
         Layout.fillWidth: true
         type: root.armed === "lock" ? TextButton.Filled : TextButton.Tonal
@@ -333,6 +344,7 @@ ColumnLayout {
 
     // --- Scenes, scripts, buttons ---------------------------------------------
     TextButton {
+        Layout.columnSpan: root.wide ? 2 : 1
         visible: root.domain in HomeAssistant.runServices
         Layout.fillWidth: true
         type: TextButton.Tonal
@@ -342,6 +354,7 @@ ColumnLayout {
 
     // --- Sensors: when it last changed ----------------------------------------
     StyledText {
+        Layout.columnSpan: root.wide ? 2 : 1
         visible: root.level >= 2 && root.can.value && !!root.entity?.last_changed
         Layout.fillWidth: true
         text: Tr.tr("Changed %1").arg(Qt.formatDateTime(new Date(root.entity?.last_changed ?? 0), "ddd hh:mm"))

@@ -213,18 +213,28 @@ StyledRect {
         anchors.fill: parent
         visible: root.verticalSlider
 
-        StyledRect {
+        // The fill reveals a tile-shaped rounded rect from the bottom, so it follows the tile's
+        // corners exactly (a plain clip, no offscreen layer).
+        Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: parent.height * (vMouse.pressed ? vMouse.value : root.sliderValue)
-            color: root.sliderKind === "brightness" ? root.accent : Colours.palette.m3primary
-            opacity: 0.85
+            clip: true
 
             Behavior on height {
                 enabled: !vMouse.pressed
 
                 Anim {}
+            }
+
+            StyledRect {
+                anchors.bottom: parent.bottom
+                width: root.width
+                height: root.height
+                radius: root.radius
+                color: root.sliderKind === "brightness" ? root.accent : Colours.palette.m3primary
+                opacity: 0.85
             }
         }
 
@@ -313,18 +323,25 @@ StyledRect {
         anchors.fill: parent
         visible: root.horizontalSlider
 
-        StyledRect {
+        Item {
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: parent.width * (hMouse.pressed && hMouse.moved ? hMouse.value : root.sliderValue)
-            color: root.sliderKind === "brightness" ? root.accent : Colours.palette.m3primary
-            opacity: 0.3
+            clip: true
 
             Behavior on width {
                 enabled: !hMouse.pressed
 
                 Anim {}
+            }
+
+            StyledRect {
+                width: root.width
+                height: root.height
+                radius: root.radius
+                color: root.sliderKind === "brightness" ? root.accent : Colours.palette.m3primary
+                opacity: 0.3
             }
         }
 
@@ -485,6 +502,7 @@ StyledRect {
             Layout.alignment: Qt.AlignVCenter
             entityId: root.entityId
             level: root.controlLevel
+            wide: root.cols >= 4
             enabled: !root.editing
         }
 

@@ -22,6 +22,8 @@ Singleton {
     property string token
 
     readonly property bool connected: status === "connected"
+    // Home tabs on screen right now (HomeTab.qml); states are fetched often only then.
+    property int viewers
 
     // All entities from /api/states (trimmed), sorted by name.
     property list<var> entities: []
@@ -453,12 +455,17 @@ Singleton {
 
     // Load saved credentials on shell start, then verify them.
     Component.onCompleted: lookupUrl.running = true
+    onViewersChanged: {
+        if (viewers > 0)
+            refreshSoon.restart();
+    }
 
-    // Keep states fresh while connected.
+    // Keep states fresh while connected: every 10 s while the Home tab is on screen, otherwise only
+    // every 2 minutes (the whole state list is parsed each time).
     Timer {
         running: root.connected
         repeat: true
-        interval: 10000
+        interval: root.viewers > 0 ? 10000 : 120000
         onTriggered: root.refresh()
     }
 

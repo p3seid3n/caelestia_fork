@@ -28,9 +28,9 @@ Item {
     property string label
     property ShellScreen screen
 
-    // Super + drag (modules/windowdrag): the icon grows as the dragged window's preview comes
-    // near, like a dock, and is inverted while the preview is over it. Holding it there fills it
-    // and switches to this workspace; dropping moves the window here.
+    // Super + drag (modules/windowdrag): the icon grows in place as the dragged window comes near
+    // (nothing moves, so the target under the cursor never jumps) and is drawn inverted on the
+    // drop pill (Workspaces.qml) while the window is over it.
     readonly property real indicatorSize: Tokens.sizes.bar.innerWidth - Tokens.padding.small
     readonly property bool dragHere: WindowDrag.carrying && screen !== null && WindowDrag.screen === screen
     readonly property bool dropTarget: WindowDrag.phase === "genie" && WindowDrag.dropWs === String(ws) && WindowDrag.dropScreen === screen
@@ -38,15 +38,14 @@ Item {
     readonly property real dragLevel: {
         if (!dragHere)
             return dropTarget ? 1 : 0;
-        const c = mapToItem(null, width / 2, indicatorSize / 2);
-        const right = mapToItem(null, width, 0).x;
+        const c = mapToItem(null, 0, indicatorSize / 2);
         const cx = WindowDrag.cursor.x - screen.x;
         const cy = WindowDrag.cursor.y - screen.y;
-        const near = Math.max(0, Math.min(1, 1 - (cx - right) / 260));
-        const level = Math.max(0, Math.min(1, 1 - Math.abs(cy - c.y) / 120));
-        return near * level;
+        const near = Math.max(0, Math.min(1, 1 - (cx - WindowDrag.barRight) / 260));
+        const level = Math.max(0, Math.min(1, 1 - Math.abs(cy - c.y) / (indicatorSize * 1.8)));
+        return near * level * level;
     }
-    property real grow: 1 + 0.3 * dragLevel
+    property real grow: 1 + 0.22 * dragLevel
 
     readonly property list<HyprlandToplevel> toplevels: Hypr.toplevelsForWs(ws, GlobalConfig.bar.workspaces.ignoredTags)
     readonly property bool isOccupied: toplevels.length > 0
@@ -112,39 +111,6 @@ Item {
         enabled: !WindowDrag.carrying
 
         Anim {}
-    }
-
-    // Inverted circle behind the icon while the dragged window is over it.
-    StyledRect {
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: indicator.y + (indicator.height - height) / 2
-        implicitWidth: root.indicatorSize * root.grow
-        implicitHeight: implicitWidth
-        radius: Tokens.rounding.full
-        color: Colours.palette.m3onSurface
-        opacity: root.dropHover ? 1 : 0
-
-        Behavior on opacity {
-            Anim {
-                type: Anim.FastEffects
-            }
-        }
-
-        // Fills while held: when full, this workspace opens (services/WindowDrag.qml).
-        StyledRect {
-            anchors.fill: parent
-            radius: Tokens.rounding.full
-            color: Colours.palette.m3primary
-            scale: root.dropHover && !root.focused && root.dragHere ? 1 : 0
-
-            Behavior on scale {
-                enabled: root.dropHover && root.dragHere
-
-                NumberAnimation {
-                    duration: 650
-                }
-            }
-        }
     }
 
     Component {
@@ -241,11 +207,6 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // Room for the icon growing during Super + drag, so its neighbours move apart.
-        Item {
-            Layout.preferredHeight: root.indicatorSize * (root.grow - 1) / 2
-        }
-
         Loader {
             id: indicator
 
@@ -261,10 +222,6 @@ Item {
             }
 
             onItemChanged: root.updateShape()
-        }
-
-        Item {
-            Layout.preferredHeight: root.indicatorSize * (root.grow - 1) / 2
         }
 
         Loader {
