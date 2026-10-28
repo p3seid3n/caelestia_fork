@@ -45,7 +45,7 @@ Item {
     Timer {
         interval: 60000
         repeat: true
-        running: !win.greeter.awake
+        running: !win.greeter.awake && win.greeter.drift
         onTriggered: {
             win.driftX = Math.round((Math.random() - 0.5) * 24);
             win.driftY = Math.round((Math.random() - 0.5) * 24);
@@ -356,7 +356,7 @@ Item {
             anchors.margins: 48
             spacing: 10
             opacity: win.prog
-            visible: opacity > 0 && !win.greeter.preview
+            visible: opacity > 0 && !win.greeter.preview && win.greeter.powerButtons
 
             Repeater {
                 model: [

@@ -125,6 +125,7 @@ StyledClippingRect {
             }
 
             delegate: Workspace {
+                screen: root.screen
                 activeWsId: root.activeWsId
                 ws: Config.bar.workspaces.showUnoccupied ? root.groupOffset + index + 1 : modelData
                 monitor: root.monitor

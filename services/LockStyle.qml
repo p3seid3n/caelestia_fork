@@ -3,6 +3,8 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Caelestia
+import Caelestia.I18n
 import qs.utils
 
 // KairosOS lock screen settings, in ~/.config/caelestia/kairos-lock.json. Edited from
@@ -39,11 +41,81 @@ Singleton {
 
     readonly property bool kairos: style !== "caelestia"
 
+    // "", "busy", "done" or "failed": the last "Use on the login screen".
+    property string greeterSync
+
+    // Writes these settings (colours resolved against the current theme, so the login screen
+    // looks like the lock screen now) to /etc/kairos/greeter.json and copies the greeter from
+    // this shell to /usr/share/kairos-greeter. Asks for the admin password (pkexec).
+    function exportToGreeter(): void {
+        if (greeterSync === "busy")
+            return;
+        let base = {};
+        try {
+            base = JSON.parse(greeterFile.text() || "{}");
+        } catch (error) {
+            base = {};
+        }
+        const p = Colours.palette;
+        const hex = c => {
+            const h = v => {
+                const x = Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16);
+                return x.length < 2 ? "0" + x : x;
+            };
+            return "#" + h(c.r) + h(c.g) + h(c.b);
+        };
+        const conf = Object.assign({}, base, {
+            user: base.user || Quickshell.env("USER"),
+            command: base.command ?? ["/usr/bin/start-hyprland"],
+            hourColour: hourColour || hex(p.m3primary),
+            minuteColour: minuteColour || hex(p.m3secondary),
+            accentColour: accentColour || hex(p.m3primary),
+            surfaceColour: hex(p.m3surfaceContainer),
+            textColour: hex(p.m3onSurface),
+            errorColour: hex(p.m3error),
+            aodTimeout,
+            drift,
+            powerButtons
+        });
+        greeterProc.payload = JSON.stringify(conf, null, 4) + "\n";
+        greeterSync = "busy";
+        greeterProc.running = true;
+    }
+
     function setOption(key: string, value: var): void {
         if (root[key] === value)
             return;
         root[key] = value;
         saveTimer.restart();
+    }
+
+    FileView {
+        id: greeterFile
+
+        path: "/etc/kairos/greeter.json"
+        printErrors: false
+    }
+
+    Process {
+        id: greeterProc
+
+        property string payload
+
+        command: ["pkexec", "sh", "-c", "mkdir -p /etc/kairos /usr/share/kairos-greeter && cat > /etc/kairos/greeter.json && chmod 644 /etc/kairos/greeter.json && cp -r \"$1\"/. /usr/share/kairos-greeter/", "sh", `${Quickshell.shellDir}/greeter`]
+        stdinEnabled: true
+        onStarted: {
+            write(payload);
+            stdinEnabled = false;
+        }
+        onExited: code => {
+            stdinEnabled = true;
+            root.greeterSync = code === 0 ? "done" : "failed";
+            greeterFile.reload();
+            if (code === 0)
+                Toaster.toast(Tr.tr("Login screen updated"), Tr.tr("It looks like the lock screen from the next login on"), "login");
+            else
+                Toaster.toast(Tr.tr("Login screen not updated"), Tr.tr("The admin password was not given, or writing to /etc failed"), "error");
+        }
     }
 
     Timer {

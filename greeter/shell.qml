@@ -27,6 +27,11 @@ ShellRoot {
     property color surfaceColour: "#201f23"
     property color textColour: "#e5e1e7"
     property color errorColour: "#ffb4ab"
+    // Same meaning as on the lock screen (services/LockStyle.qml); written together with the
+    // colours by Settings → Lock screen → "Use on the login screen".
+    property int aodTimeout: 20
+    property bool drift: true
+    property bool powerButtons: true
 
     // State
     readonly property bool preview: !Greetd.available
@@ -98,6 +103,12 @@ ShellRoot {
                 for (const key of ["hourColour", "minuteColour", "accentColour", "surfaceColour", "textColour", "errorColour"])
                     if (c[key])
                         shell[key] = c[key];
+                if (typeof c.aodTimeout === "number")
+                    shell.aodTimeout = Math.max(5, Math.min(600, c.aodTimeout));
+                if (typeof c.drift === "boolean")
+                    shell.drift = c.drift;
+                if (typeof c.powerButtons === "boolean")
+                    shell.powerButtons = c.powerButtons;
             } catch (error) {
                 shell.message = "Invalid /etc/kairos/greeter.json";
             }
@@ -140,7 +151,7 @@ ShellRoot {
     Timer {
         id: idle
 
-        interval: 20000
+        interval: shell.aodTimeout * 1000
         running: shell.awake && !shell.buffer && !shell.busy
         onTriggered: shell.awake = false
     }

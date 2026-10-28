@@ -218,5 +218,19 @@ PageBase {
                     LockStyle.setOption("accentColour", value.trim());
             }
         }
+
+        SectionHeader {
+            text: Tr.tr("Login screen")
+        }
+
+        RowButton {
+            first: true
+            last: true
+            icon: "login"
+            text: LockStyle.greeterSync === "busy" ? Tr.tr("Updating the login screen…") : Tr.tr("Use on the login screen")
+            subtext: Tr.tr("The screen after starting the PC (greetd) gets these colours, the clock timeout, drift and power buttons. Asks for your password.")
+            disabled: LockStyle.greeterSync === "busy"
+            onClicked: LockStyle.exportToGreeter()
+        }
     }
 }

@@ -26,6 +26,27 @@ Item {
     property string activeLabel
     property string occupiedLabel
     property string label
+    property ShellScreen screen
+
+    // Super + drag (modules/windowdrag): the icon grows as the dragged window's preview comes
+    // near, like a dock, and is inverted while the preview is over it. Holding it there fills it
+    // and switches to this workspace; dropping moves the window here.
+    readonly property real indicatorSize: Tokens.sizes.bar.innerWidth - Tokens.padding.small
+    readonly property bool dragHere: WindowDrag.carrying && screen !== null && WindowDrag.screen === screen
+    readonly property bool dropTarget: WindowDrag.phase === "genie" && WindowDrag.dropWs === String(ws) && WindowDrag.dropScreen === screen
+    readonly property bool dropHover: (dragHere && WindowDrag.hoverWs === String(ws)) || dropTarget
+    readonly property real dragLevel: {
+        if (!dragHere)
+            return dropTarget ? 1 : 0;
+        const c = mapToItem(null, width / 2, indicatorSize / 2);
+        const right = mapToItem(null, width, 0).x;
+        const cx = WindowDrag.cursor.x - screen.x;
+        const cy = WindowDrag.cursor.y - screen.y;
+        const near = Math.max(0, Math.min(1, 1 - (cx - right) / 260));
+        const level = Math.max(0, Math.min(1, 1 - Math.abs(cy - c.y) / 120));
+        return near * level;
+    }
+    property real grow: 1 + 0.3 * dragLevel
 
     readonly property list<HyprlandToplevel> toplevels: Hypr.toplevelsForWs(ws, GlobalConfig.bar.workspaces.ignoredTags)
     readonly property bool isOccupied: toplevels.length > 0
@@ -41,6 +62,8 @@ Item {
         return mon && mon !== monitor;
     }
     readonly property color fgColour: {
+        if (dropHover)
+            return Colours.palette.m3surface;
         if (onOtherMonitor)
             return offMonitorColour;
         if (focused || isOccupied || Config.bar.workspaces.occupiedBg)
@@ -81,6 +104,46 @@ Item {
     Behavior on opacity {
         Anim {
             type: Anim.DefaultEffects
+        }
+    }
+
+    // Follows the cursor directly while dragging, eases back afterwards.
+    Behavior on grow {
+        enabled: !WindowDrag.carrying
+
+        Anim {}
+    }
+
+    // Inverted circle behind the icon while the dragged window is over it.
+    StyledRect {
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: indicator.y + (indicator.height - height) / 2
+        implicitWidth: root.indicatorSize * root.grow
+        implicitHeight: implicitWidth
+        radius: Tokens.rounding.full
+        color: Colours.palette.m3onSurface
+        opacity: root.dropHover ? 1 : 0
+
+        Behavior on opacity {
+            Anim {
+                type: Anim.FastEffects
+            }
+        }
+
+        // Fills while held: when full, this workspace opens (services/WindowDrag.qml).
+        StyledRect {
+            anchors.fill: parent
+            radius: Tokens.rounding.full
+            color: Colours.palette.m3primary
+            scale: root.dropHover && !root.focused && root.dragHere ? 1 : 0
+
+            Behavior on scale {
+                enabled: root.dropHover && root.dragHere
+
+                NumberAnimation {
+                    duration: 650
+                }
+            }
         }
     }
 
@@ -178,11 +241,17 @@ Item {
         anchors.fill: parent
         spacing: 0
 
+        // Room for the icon growing during Super + drag, so its neighbours move apart.
+        Item {
+            Layout.preferredHeight: root.indicatorSize * (root.grow - 1) / 2
+        }
+
         Loader {
             id: indicator
 
             Layout.alignment: Qt.AlignHCenter | Qt.AlignTop
-            Layout.preferredHeight: Tokens.sizes.bar.innerWidth - Tokens.padding.small
+            Layout.preferredHeight: root.indicatorSize
+            scale: root.grow
             sourceComponent: {
                 if (root.displayType === BarWorkspaceDisplay.Icons)
                     return iconLoaderComponent;
@@ -192,6 +261,10 @@ Item {
             }
 
             onItemChanged: root.updateShape()
+        }
+
+        Item {
+            Layout.preferredHeight: root.indicatorSize * (root.grow - 1) / 2
         }
 
         Loader {

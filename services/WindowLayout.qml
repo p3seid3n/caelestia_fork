@@ -41,6 +41,9 @@ Singleton {
     // Super + drag shrinks the window to a preview, shows where it lands and lets it be dropped on
     // a workspace in the bar (services/WindowDrag.qml, modules/windowdrag).
     property bool dragPreview: true
+    // Once: windows left invisible by an earlier version of the drag preview get their opacity back.
+    property bool opacityHealed
+    readonly property bool healOpacity: loaded && !opacityHealed
 
     // Gaps and borders; only applied while `customGaps` is on, otherwise the Hyprland config rules.
     property bool customGaps: false
@@ -172,8 +175,13 @@ Singleton {
     //     the drag starts, goes and ends (socket2 events "custom>>kairosdrag:..."), hides the real
     //     window while it is carried and shows a preview instead (services/WindowDrag.qml).
     function applyRuntime(): void {
-        if (available && loaded && lua)
-            luaEval(runtimeLua());
+        if (!available || !loaded || !lua)
+            return;
+        luaEval(runtimeLua());
+        if (!opacityHealed) {
+            opacityHealed = true;
+            save();
+        }
     }
 
     function runtimeLua(): string {
@@ -297,7 +305,7 @@ Singleton {
         end
         KAIROS.show = function(addr)
             if KAIROS.hidden == addr then KAIROS.hidden = nil end
-            hl.dispatch(hl.dsp.window.set_prop({ prop = "opacity", value = "unset", window = "address:" .. addr }))
+            hl.dispatch(hl.dsp.window.set_prop({ prop = "opacity", value = "1", window = "address:" .. addr }))
         end
         KAIROS.dragStart = function(w)
             if w == nil or w.fullscreen ~= 0 then return end
@@ -373,6 +381,12 @@ Singleton {
             pcall(hl.unbind, "SUPER + mouse:272")
             pcall(hl.bind, "SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
             KAIROS.dragBound = false
+        end
+        if ${healOpacity} and KAIROS.healed == nil then
+            KAIROS.healed = true
+            for _, w in ipairs(hl.get_windows()) do
+                pcall(hl.dispatch, hl.dsp.window.set_prop({ prop = "opacity", value = "1", window = w }))
+            end
         end
         if KAIROS.hooked == nil then
             KAIROS.hooked = true
@@ -620,6 +634,7 @@ Singleton {
                 resizeOnEdges: root.resizeOnEdges,
                 dismissSpecial: root.dismissSpecial,
                 dragPreview: root.dragPreview,
+                opacityHealed: root.opacityHealed,
                 customGaps: root.customGaps,
                 gapsIn: root.gapsIn,
                 gapsOut: root.gapsOut,
@@ -645,6 +660,7 @@ Singleton {
                 root.resizeOnEdges = c.resizeOnEdges !== false;
                 root.dismissSpecial = c.dismissSpecial !== false;
                 root.dragPreview = c.dragPreview !== false;
+                root.opacityHealed = c.opacityHealed === true;
                 root.customGaps = c.customGaps === true;
                 root.gapsIn = int(c.gapsIn, 0, 60, root.gapsIn);
                 root.gapsOut = int(c.gapsOut, 0, 80, root.gapsOut);

@@ -16,8 +16,8 @@ import qs.utils
 //     the drag starts; the frame is taken once, so nothing large is redrawn while dragging.
 //   - An outline and fill where the window will land: the half of the tiled window under the
 //     cursor (the other half shows where that window moves to), or the floating window's new spot.
-//   - The bar's workspaces as drop targets once the preview comes near: they grow like a dock,
-//     the one under the preview is inverted, holding it there fills it and switches to it.
+//   - The bar's own workspace icons become drop targets (bar/components/workspaces/Workspace.qml
+//     grows them like a dock and inverts the one under the cursor; this picks which one).
 //   - Drops: onto a workspace the preview is sucked into it; elsewhere it grows into the outline.
 Item {
     id: root
@@ -44,7 +44,7 @@ Item {
 
     readonly property int gapsIn: num(Hypr.options["general:gaps_in"], 5)
     readonly property int windowRadius: num(Hypr.options["decoration:rounding"], Tokens.rounding.medium)
-    readonly property real bubbleSize: Tokens.sizes.bar.innerWidth - Tokens.padding.small
+    readonly property real iconSize: Tokens.sizes.bar.innerWidth - Tokens.padding.small
 
     // Where the window will land and where the window it shares a slot with goes (width 0: none).
     readonly property var landing: computeLanding()
@@ -147,31 +147,33 @@ Item {
         };
     }
 
-    // Picks the workspace under the preview (the closest bubble the cursor is level with).
+    // Picks the bar workspace the cursor is level with. The current one is kept until the cursor
+    // is clearly past it, so the icons growing and moving apart never make the choice flicker.
     function updateHover(): void {
-        if (!carrying || nearness <= 0 || cx > barRight + 90) {
+        if (!carrying || !column || cx > barRight + 90) {
             if (mine && WindowDrag.carrying)
                 WindowDrag.hoverWs = "";
             return;
         }
-        let best = null;
-        let bestDist = Infinity;
-        const bubbles = [];
-        for (let i = 0; i < bubbleRepeater.count; i++)
-            bubbles.push(bubbleRepeater.itemAt(i));
-        bubbles.push(newBubble);
-        for (const b of bubbles) {
-            if (!b || !b.visible)
-                continue;
-            const dist = Math.abs(cy - b.centre.y);
-            if (dist < (bubbleSize * b.scale) / 2 + Tokens.spacing.small && dist < bestDist) {
-                best = b;
-                bestDist = dist;
-            }
-        }
-        WindowDrag.hoverWs = best ? best.wsSel : "";
-        if (best)
-            WindowDrag.dropPoint = Qt.point(best.centre.x + bubbleSize * (best.scale - 1) / 2, best.centre.y);
+        const items = (column.workspaces ?? []).filter(i => i);
+        const spans = items.map(item => {
+            const top = item.mapToItem(root, 0, 0).y;
+            return {
+                item,
+                top,
+                bottom: top + item.height
+            };
+        });
+        const spacing = Tokens.spacing.extraSmall;
+        const current = spans.find(sp => String(sp.item.ws) === WindowDrag.hoverWs);
+        let pick = null;
+        if (current && cy >= current.top - spacing - 6 && cy <= current.bottom + spacing + 6)
+            pick = current;
+        else
+            pick = spans.find(sp => cy >= sp.top - spacing / 2 && cy <= sp.bottom + spacing / 2) ?? null;
+        WindowDrag.hoverWs = pick ? String(pick.item.ws) : "";
+        if (pick)
+            WindowDrag.dropPoint = pick.item.mapToItem(root, pick.item.width / 2, root.iconSize / 2);
     }
 
     anchors.fill: parent
@@ -245,40 +247,6 @@ Item {
         target: root.landing.rect
         fillOpacity: 0.16
         borderOpacity: 1
-    }
-
-    // --- Workspaces as drop targets ------------------------------------------------------------
-    Repeater {
-        id: bubbleRepeater
-
-        model: {
-            const items = root.column?.workspaces ?? [];
-            return root.mine ? items.filter(i => i) : [];
-        }
-
-        Bubble {
-            required property Item modelData
-
-            wsSel: String(modelData.ws ?? "")
-            label: wsSel
-            centre: {
-                root.cx;
-                root.cy;
-                return modelData.mapToItem(root, modelData.width / 2, root.bubbleSize / 2);
-            }
-        }
-    }
-
-    // A new, empty workspace under the last one.
-    Bubble {
-        id: newBubble
-
-        readonly property Item last: bubbleRepeater.count > 0 ? bubbleRepeater.itemAt(bubbleRepeater.count - 1) : null
-
-        visible: root.mine && last !== null
-        wsSel: "empty"
-        icon: "add"
-        centre: last ? Qt.point(last.centre.x, last.centre.y + root.bubbleSize + Tokens.spacing.medium) : Qt.point(0, 0)
     }
 
     // --- The preview -----------------------------------------------------------------------------
@@ -407,76 +375,6 @@ Item {
             Anim {
                 type: Anim.DefaultEffects
             }
-        }
-    }
-
-    component Bubble: Item {
-        id: bubble
-
-        property string wsSel
-        property string label
-        property string icon
-        property point centre
-
-        readonly property bool hovered: wsSel !== "" && (WindowDrag.hoverWs === wsSel || (root.phase === "genie" && WindowDrag.dropWs === wsSel))
-        readonly property bool current: wsSel === String(WindowDrag.activeWsOn(root.screen))
-        // Dock-style magnification by how level the cursor is with this bubble.
-        readonly property real level: Math.max(0, 1 - Math.abs(root.cy - centre.y) / 110)
-
-        x: centre.x - width / 2
-        y: centre.y - height / 2
-        width: root.bubbleSize
-        height: root.bubbleSize
-        scale: 1 + 0.55 * level * root.nearness
-        transformOrigin: Item.Left
-        opacity: root.nearness > 0.02 || root.phase === "genie" ? 1 : 0
-
-        Behavior on opacity {
-            Anim {
-                type: Anim.DefaultEffects
-            }
-        }
-
-        StyledRect {
-            anchors.fill: parent
-            radius: Tokens.rounding.full
-            color: bubble.hovered ? Colours.palette.m3onSurface : bubble.current ? Colours.palette.m3primaryContainer : Colours.palette.m3surfaceContainerHighest
-            border.width: bubble.current && !bubble.hovered ? 2 : 0
-            border.color: Colours.palette.m3primary
-
-            // Fills while held over another workspace: when full, that workspace opens.
-            StyledRect {
-                anchors.centerIn: parent
-                width: parent.width
-                height: parent.height
-                radius: Tokens.rounding.full
-                color: Qt.alpha(Colours.palette.m3surface, 0.3)
-                scale: bubble.hovered && !bubble.current && bubble.wsSel !== "empty" ? 1 : 0
-
-                Behavior on scale {
-                    enabled: bubble.hovered
-
-                    NumberAnimation {
-                        duration: 650
-                    }
-                }
-            }
-        }
-
-        StyledText {
-            anchors.centerIn: parent
-            visible: bubble.icon === ""
-            text: bubble.label
-            font: Tokens.font.body.builders.medium.weight(Font.DemiBold).build()
-            color: bubble.hovered ? Colours.palette.m3surface : bubble.current ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurface
-        }
-
-        MaterialIcon {
-            anchors.centerIn: parent
-            visible: bubble.icon !== ""
-            text: bubble.icon
-            color: bubble.hovered ? Colours.palette.m3surface : Colours.palette.m3onSurface
-            fontStyle: Tokens.font.icon.medium
         }
     }
 }

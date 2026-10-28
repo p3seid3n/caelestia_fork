@@ -6,5 +6,8 @@
     "accentColour": "#E60012",
     "surfaceColour": "#201f23",
     "textColour": "#e5e1e7",
-    "errorColour": "#ffb4ab"
+    "errorColour": "#ffb4ab",
+    "aodTimeout": 20,
+    "drift": true,
+    "powerButtons": true
 }

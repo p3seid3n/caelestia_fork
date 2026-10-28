@@ -138,8 +138,9 @@ Singleton {
                 phase = "genie";
                 phaseTimer.interval = 460;
             } else if (hoverWs !== "") {
-                // Onto the workspace you are on: put it back where it was.
-                finish("", floatingAtStart ? startRect.x : null, startRect.y);
+                // Onto the workspace you are on (e.g. after holding it there to switch): a floating
+                // window goes back to its old spot, and it is brought here if it was left behind.
+                finish(windowWs !== here && here > 0 ? String(here) : "", floatingAtStart ? startRect.x : null, startRect.y);
                 phase = "home";
                 phaseTimer.interval = 260;
             } else {
