@@ -80,6 +80,14 @@ PageBase {
         }
 
         ToggleRow {
+            text: Tr.tr("Click to focus")
+            subtext: Tr.tr("Hovering a window behind others doesn't bring it forward; scrolling still reaches it")
+            disabled: !WindowLayout.floating
+            checked: WindowLayout.clickToFocus
+            onToggled: WindowLayout.setOption("clickToFocus", checked)
+        }
+
+        ToggleRow {
             text: Tr.tr("Snap to edges")
             subtext: Tr.tr("Windows stick to the screen edges and to each other when moved close")
             disabled: !WindowLayout.floating

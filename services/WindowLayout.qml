@@ -41,6 +41,8 @@ Singleton {
     // Super + drag shrinks the window to a preview, shows where it lands and lets it be dropped on
     // a workspace in the bar (services/WindowDrag.qml, modules/windowdrag).
     property bool dragPreview: true
+    // Floating mode: windows are focused (and raised) by clicking, not by hovering.
+    property bool clickToFocus: true
     // Once: windows left invisible by an earlier version of the drag preview get their opacity back.
     property bool opacityHealed
     readonly property bool healOpacity: loaded && !opacityHealed
@@ -86,7 +88,11 @@ Singleton {
             return;
         root[key] = value;
         save();
-        applyTimer.restart();
+        // Turning click-to-focus off needs the config's own focus setting back.
+        if (key === "clickToFocus" && !value && floating)
+            reloadTimer.restart();
+        else
+            applyTimer.restart();
     }
 
     // Takes the values Hyprland uses right now as the starting point for custom gaps.
@@ -142,6 +148,13 @@ Singleton {
             opts["general:snap:enabled"] = snap;
             opts["general:snap:respect_gaps"] = true;
             opts["general:resize_on_border"] = resizeOnEdges;
+            // Like Windows and macOS: hovering a window behind another only sends it the pointer
+            // (scrolling still works there), a click focuses and raises it. Leaving floating mode
+            // reloads the Hyprland config, which brings its own focus setting back.
+            if (clickToFocus) {
+                opts["input:follow_mouse"] = 2;
+                opts["input:float_switch_override_focus"] = 0;
+            }
         }
         if (Object.keys(opts).length > 0)
             Hypr.extras.applyOptions(opts);
@@ -381,6 +394,19 @@ Singleton {
             pcall(hl.unbind, "SUPER + mouse:272")
             pcall(hl.bind, "SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
             KAIROS.dragBound = false
+        end
+        if KAIROS.layerRules == nil and hl.layer_rule ~= nil then
+            KAIROS.layerRules = true
+            for _, ns in ipairs({ "caelestia-handoff", "caelestia-sleep-fade", "caelestia-window-switcher" }) do
+                pcall(hl.layer_rule, { match = { namespace = ns }, no_anim = true })
+            end
+        end
+        if KAIROS.tabBound == nil then
+            KAIROS.tabBound = true
+            pcall(hl.unbind, "SUPER + TAB")
+            pcall(hl.unbind, "SUPER + SHIFT + TAB")
+            pcall(hl.bind, "SUPER + TAB", hl.dsp.global("caelestia:windowSwitcher"), { repeating = true })
+            pcall(hl.bind, "SUPER + SHIFT + TAB", hl.dsp.global("caelestia:windowSwitcherPrev"), { repeating = true })
         end
         if ${healOpacity} and KAIROS.healed == nil then
             KAIROS.healed = true
@@ -634,6 +660,7 @@ Singleton {
                 resizeOnEdges: root.resizeOnEdges,
                 dismissSpecial: root.dismissSpecial,
                 dragPreview: root.dragPreview,
+                clickToFocus: root.clickToFocus,
                 opacityHealed: root.opacityHealed,
                 customGaps: root.customGaps,
                 gapsIn: root.gapsIn,
@@ -660,6 +687,7 @@ Singleton {
                 root.resizeOnEdges = c.resizeOnEdges !== false;
                 root.dismissSpecial = c.dismissSpecial !== false;
                 root.dragPreview = c.dragPreview !== false;
+                root.clickToFocus = c.clickToFocus !== false;
                 root.opacityHealed = c.opacityHealed === true;
                 root.customGaps = c.customGaps === true;
                 root.gapsIn = int(c.gapsIn, 0, 60, root.gapsIn);

@@ -445,6 +445,7 @@ StyledFlickable {
         }
 
         StyledText {
+            wrapMode: Text.WordWrap
             Layout.fillWidth: true
             visible: root.error !== ""
             text: root.error

@@ -70,12 +70,14 @@ Item {
     readonly property rect thumb: {
         const w = startLocal.width * fit * thumbScale;
         const h = startLocal.height * fit * thumbScale;
-        let x = cx + 22;
-        let y = cy + 18;
+        // Beside the cursor; near the bar it moves level with the cursor, still to its right.
+        let x = cx + 28;
+        let y = mix(cy + 18, cy - h / 2, nearness);
         if (x + w > width - 12)
-            x = cx - 22 - w;
+            x = cx - 28 - w;
         if (y + h > height - 12)
-            y = cy - 18 - h;
+            y = height - 12 - h;
+        y = Math.max(12, y);
         return Qt.rect(x, y, w, h);
     }
 
@@ -279,7 +281,9 @@ Item {
     Item {
         id: preview
 
-        // Floating: the window at its real size under the cursor, shrinking around the grab point.
+        // Floating: the window at its real size under the cursor, shrinking around the grab point;
+        // as it shrinks it slides off to the right of the cursor (vertically centred on it), so
+        // the workspace icons under the cursor stay visible and easy to pick.
         readonly property rect floatRect: {
             const full = root.startLocal;
             const tw = full.width * root.fit * 0.8;
@@ -287,7 +291,9 @@ Item {
             const e = root.shrink;
             const w = root.mix(full.width, tw, e);
             const h = root.mix(full.height, th, e);
-            return Qt.rect(root.cx - root.grabU * w, root.cy - root.grabV * h, w, h);
+            const left = root.mix(root.grabU * w, -28, e);
+            const top = root.mix(root.grabV * h, h / 2, e);
+            return Qt.rect(root.cx - left, root.cy - top, w, h);
         }
         readonly property rect fullAtCursor: Qt.rect(root.cx - root.grabU * root.startLocal.width, root.cy - root.grabV * root.startLocal.height, root.startLocal.width, root.startLocal.height)
         readonly property rect carryRect: root.floatStyle ? floatRect : root.mixRect(root.startLocal, root.thumb, root.collapse)

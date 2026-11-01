@@ -92,6 +92,7 @@ Item {
         }
 
         StyledText {
+            elide: Text.ElideRight
             Layout.fillWidth: true
             visible: root.open.length > root.shown.length
             text: Tr.tr("+%1 more").arg(root.open.length - root.shown.length)
@@ -100,6 +101,7 @@ Item {
         }
 
         StyledText {
+            elide: Text.ElideRight
             Layout.fillWidth: true
             visible: root.open.length === 0
             text: Todos.items.length === 0 ? Tr.tr("No tasks yet") : Tr.tr("All done")

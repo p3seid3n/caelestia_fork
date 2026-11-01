@@ -59,6 +59,7 @@ Item {
                 }
 
                 StyledText {
+                    elide: Text.ElideRight
                     Layout.fillWidth: true
                     text: Todos.items.length === 0 ? Tr.tr("Nothing written down yet") : Todos.openCount === 0 ? Tr.tr("Everything is done") : Tr.trN("%n task left", "%n tasks left", Todos.openCount)
                     font: Tokens.font.body.medium

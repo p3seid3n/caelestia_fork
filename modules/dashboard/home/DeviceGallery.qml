@@ -227,6 +227,7 @@ ColumnLayout {
                     }
 
                     StyledText {
+                        elide: Text.ElideRight
                         Layout.fillWidth: true
                         text: row.category?.title ?? row.key
                         font: Tokens.font.body.medium

@@ -18,6 +18,8 @@ Scope {
         // ready before it first opens.
         WindowLayout;
         WindowDrag;
+        WindowSwitcher;
+        FileDock;
         Displays;
         NotifCentre;
         DashboardLayout;

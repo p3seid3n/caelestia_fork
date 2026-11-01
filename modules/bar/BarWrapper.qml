@@ -4,6 +4,7 @@ import QtQuick
 import Quickshell
 import Caelestia.Config
 import qs.components
+import qs.services
 import qs.utils
 import qs.modules.bar.popouts as BarPopouts
 
@@ -70,6 +71,28 @@ Item {
             }
         }
     ]
+
+    // Files dragged onto the bar from other apps go into the file dock.
+    DropArea {
+        anchors.fill: parent
+
+        onEntered: drag => {
+            if (!drag.hasUrls || FileDock.dragging) {
+                drag.accepted = false;
+                return;
+            }
+            FileDock.dropHover = true;
+            drag.accept(Qt.CopyAction);
+        }
+        onExited: FileDock.dropHover = false
+        onDropped: drop => {
+            FileDock.dropHover = false;
+            if (!drop.hasUrls || FileDock.dragging)
+                return;
+            FileDock.addUrls(drop.urls);
+            drop.accept(Qt.CopyAction);
+        }
+    }
 
     Loader {
         id: content

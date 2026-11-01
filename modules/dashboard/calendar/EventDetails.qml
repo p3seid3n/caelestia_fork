@@ -61,6 +61,7 @@ ColumnLayout {
             }
 
             StyledText {
+                elide: Text.ElideRight
                 Layout.fillWidth: true
                 visible: text !== ""
                 text: {

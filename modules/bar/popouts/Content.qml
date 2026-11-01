@@ -120,6 +120,11 @@ Item {
         }
 
         Popout {
+            name: "filedock"
+            sourceComponent: FileDockPopout {}
+        }
+
+        Popout {
             name: "lockstatus"
             sourceComponent: LockStatus {}
         }

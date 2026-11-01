@@ -101,6 +101,7 @@ Item {
         }
 
         StyledText {
+            elide: Text.ElideRight
             Layout.fillWidth: true
             visible: root.shown.length === 0
             text: Tr.tr("Nothing coming up")

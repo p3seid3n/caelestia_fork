@@ -71,6 +71,7 @@ Item {
             }
 
             StyledText {
+                elide: Text.ElideRight
                 Layout.fillWidth: true
                 text: Tr.tr("Home")
                 font: Tokens.font.body.builders.large.size(28).weight(Font.DemiBold).build()

@@ -104,6 +104,7 @@ Item {
                     }
 
                     StyledText {
+                        elide: Text.ElideRight
                         Layout.fillWidth: true
                         text: DashboardLayout.meta[row.modelData]?.name ?? row.modelData
                         font: Tokens.font.body.medium

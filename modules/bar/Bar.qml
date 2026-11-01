@@ -68,6 +68,17 @@ ColumnLayout {
                 popouts.hasCurrent = false;
                 tray.expanded = true;
             }
+        } else if (id === "clock") {
+            // The file dock under the clock
+            const dock = (ch.item as Item)?.dock as Item; // qmllint disable missing-property
+            const at = dock ? mapToItem(dock, 0, y).y : -1;
+            if (dock && FileDock.items.length > 0 && at >= 0 && at <= dock.height) {
+                popouts.currentName = "filedock";
+                popouts.currentCenter = Qt.binding(() => dock.mapToItem(root, 0, dock.height / 2).y);
+                popouts.hasCurrent = true;
+            } else {
+                popouts.hasCurrent = false;
+            }
         } else if (id === "activeWindow" && Config.bar.popouts.activeWindow && Config.bar.activeWindow.showOnHover) {
             popouts.currentName = id.toLowerCase();
             popouts.currentCenter = (ch.item as Item).mapToItem(root, 0, (ch.item as Item).implicitHeight / 2).y ?? 0;
@@ -158,8 +169,22 @@ ColumnLayout {
             DelegateChoice {
                 roleValue: "clock"
                 delegate: EntryWrapper {
-                    Clock {
-                        objectName: "taskbarClock"
+                    // KairosOS: the file dock sits right under the clock; it takes no room
+                    // (not even the spacing) while it is empty.
+                    Column {
+                        readonly property Item dock: dockStack
+
+                        spacing: root.spacing * dockStack.reveal
+
+                        Clock {
+                            objectName: "taskbarClock"
+                        }
+
+                        DockStack {
+                            id: dockStack
+
+                            objectName: "taskbarFileDock"
+                        }
                     }
                 }
             }

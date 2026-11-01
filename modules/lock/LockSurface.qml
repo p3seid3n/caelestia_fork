@@ -256,4 +256,13 @@ WlSessionLockSurface {
             scale: 0
         }
     }
+
+    // KairosOS: the screen fading to black before it sleeps (services/ScreenSleep.qml).
+    Rectangle {
+        anchors.fill: parent
+        z: 1000
+        color: "black"
+        opacity: ScreenSleep.cover
+        visible: opacity > 0
+    }
 }

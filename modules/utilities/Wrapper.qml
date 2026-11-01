@@ -36,6 +36,7 @@ Item {
     readonly property real totalPadding: content.anchors.margins + CUtils.clamp(content.anchors.margins - Config.border.thickness, 0, content.anchors.margins)
     readonly property real nonAnimHeight: ((content.item as Content)?.nonAnimHeight ?? 0) + totalPadding
     property real offsetScale: shouldBeActive ? 0 : 1
+    property bool warm
     property real sidebarLerp
 
     visible: offsetScale < 1
@@ -78,6 +79,12 @@ Item {
         Anim {}
     }
 
+    Timer {
+        running: Config.utilities.enabled
+        interval: 6500
+        onTriggered: root.warm = true
+    }
+
     Connections {
         function onShareRequested(): void {
             root.sharePicker.open();
@@ -93,8 +100,8 @@ Item {
         anchors.left: parent.left
         anchors.margins: Tokens.padding.large
 
-        asynchronous: true
-        active: root.shouldBeActive || root.visible
+        // Built once, a few seconds after login, and kept: opening is then only the slide.
+        active: root.warm || root.shouldBeActive || root.visible
 
         sourceComponent: Content {
             implicitWidth: root.implicitWidth - root.totalPadding

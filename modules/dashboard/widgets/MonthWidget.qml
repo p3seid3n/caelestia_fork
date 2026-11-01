@@ -31,6 +31,7 @@ Item {
             id: header
 
             Layout.fillWidth: true
+            elide: Text.ElideRight
             text: Qt.locale().monthName(root.month) + " " + root.year
             font: Tokens.font.body.builders.medium.weight(Font.DemiBold).build()
             color: Colours.palette.m3primary

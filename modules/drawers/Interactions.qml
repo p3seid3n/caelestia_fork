@@ -93,7 +93,8 @@ CustomMouseArea {
             if (!notifCentreShortcutActive)
                 screenState.notifCentre = false;
 
-            if (!popouts.currentName.startsWith("traymenu") || ((popouts.current as StackView)?.depth ?? 0) <= 1) {
+            // KairosOS: a file being dragged out of the file dock keeps its popout open.
+            if (!FileDock.dragging && (!popouts.currentName.startsWith("traymenu") || ((popouts.current as StackView)?.depth ?? 0) <= 1)) {
                 popouts.hasCurrent = false;
                 bar.closeTray();
             }
@@ -260,7 +261,9 @@ CustomMouseArea {
         }
 
         // Show popouts on hover
-        if (x < bar.implicitWidth) {
+        if (FileDock.dragging) {
+            // Leave the file dock as it is while a file is dragged out of it.
+        } else if (x < bar.implicitWidth) {
             bar.checkPopout(y);
         } else if ((!popouts.currentName.startsWith("traymenu") || ((popouts.current as StackView)?.depth ?? 0) <= 1) && !inLeftPanel(panels.popoutsWrapper, x, y)) {
             popouts.hasCurrent = false;

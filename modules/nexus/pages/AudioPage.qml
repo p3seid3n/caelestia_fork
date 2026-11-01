@@ -83,5 +83,20 @@ PageBase {
             subtext: Audio.streams.length === 0 ? Tr.tr("No apps playing audio") : Tr.trN("%n app playing audio", "%n apps playing audio", Audio.streams.length)
             onClicked: root.nState.openSubPage(1)
         }
+
+        // KairosOS: tactile pulses (services/Haptics.qml)
+        ToggleRow {
+            Layout.topMargin: Tokens.spacing.large - parent.spacing
+            first: true
+            last: true
+            text: Tr.tr("Haptic pulses")
+            subtext: Tr.tr("A short, very low bump when devices snap into place - felt through a subwoofer")
+            checked: Haptics.enabled
+            onToggled: {
+                Haptics.setEnabled(checked);
+                if (checked)
+                    Haptics.snap();
+            }
+        }
     }
 }

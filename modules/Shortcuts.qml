@@ -66,6 +66,12 @@ Scope {
         description: "Toggle launcher"
         onPressed: root.launcherInterrupted = false
         onReleased: {
+            // KairosOS: letting go of Super after Super + Tab picks the window instead.
+            if (WindowSwitcher.open || WindowSwitcher.swallowSuper) {
+                WindowSwitcher.commit();
+                root.launcherInterrupted = false;
+                return;
+            }
             if (!root.launcherInterrupted && !root.hasFullscreen) {
                 const screenState = ShellState.forActive();
                 screenState.launcher = !screenState.launcher;
@@ -106,6 +112,39 @@ Scope {
             const screenState = ShellState.forActive();
             screenState.utilities = !screenState.utilities;
         }
+    }
+
+    // KairosOS: Super + Tab window switcher (bound by services/WindowLayout.qml).
+    // qmllint disable unresolved-type
+    CustomShortcut {
+        // qmllint enable unresolved-type
+        name: "windowSwitcher"
+        description: "Next window (Super + Tab)"
+        onPressed: WindowSwitcher.next()
+    }
+
+    // qmllint disable unresolved-type
+    CustomShortcut {
+        // qmllint enable unresolved-type
+        name: "windowSwitcherPrev"
+        description: "Previous window (Super + Shift + Tab)"
+        onPressed: WindowSwitcher.prev()
+    }
+
+    IpcHandler {
+        function next(): void {
+            WindowSwitcher.next();
+        }
+
+        function prev(): void {
+            WindowSwitcher.prev();
+        }
+
+        function commit(): void {
+            WindowSwitcher.commit();
+        }
+
+        target: "windowSwitcher"
     }
 
     IpcHandler {

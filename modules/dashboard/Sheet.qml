@@ -81,6 +81,7 @@ Item {
                 spacing: Tokens.spacing.small
 
                 StyledText {
+                    elide: Text.ElideRight
                     Layout.fillWidth: true
                     text: root.title
                     font: Tokens.font.body.builders.large.size(22).weight(Font.DemiBold).build()

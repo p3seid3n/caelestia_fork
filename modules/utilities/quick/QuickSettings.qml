@@ -30,19 +30,49 @@ ColumnLayout {
     readonly property var btAdapter: Bluetooth.defaultAdapter // qmllint disable unresolved-type
     readonly property var btConnected: Bluetooth.devices.values.filter(d => d.connected) // qmllint disable unresolved-type
     readonly property real sliderWidth: 64
+    readonly property bool shown: screenState.utilities
+    // Opening: the rows rise into place one after another (0 -> 1).
+    property real enter: 1
 
     function closeAnd(action: var): void {
         root.screenState.utilities = false;
         action();
     }
 
+    // How far row `i` is into its entrance.
+    function stage(i: int): real {
+        const t = Math.max(0, Math.min(1, (enter - i * 0.08) / 0.68));
+        return 1 - Math.pow(1 - t, 3);
+    }
+
     spacing: Tokens.spacing.medium
+
+    onShownChanged: {
+        if (shown) {
+            enter = 0;
+            enterAnim.restart();
+        }
+    }
+
+    NumberAnimation {
+        id: enterAnim
+
+        target: root
+        property: "enter"
+        to: 1
+        duration: Tokens.anim.durations.expressiveDefaultSpatial
+        easing.type: Easing.Linear
+    }
 
     // --- Header ---------------------------------------------------------------------------
     RowLayout {
         Layout.fillWidth: true
         Layout.leftMargin: Tokens.padding.small
         spacing: Tokens.spacing.small
+        opacity: root.stage(0)
+        transform: Translate {
+            y: (1 - root.stage(0)) * 16
+        }
 
         StyledRect {
             visible: UPower.displayDevice.isLaptopBattery
@@ -103,6 +133,10 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: Tokens.spacing.small
+        opacity: root.stage(1)
+        transform: Translate {
+            y: (1 - root.stage(1)) * 20
+        }
 
         ColumnLayout {
             Layout.fillWidth: true
@@ -152,6 +186,10 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: Tokens.spacing.medium
+        opacity: root.stage(2)
+        transform: Translate {
+            y: (1 - root.stage(2)) * 24
+        }
 
         GridLayout {
             Layout.fillWidth: true
@@ -265,6 +303,10 @@ ColumnLayout {
         radius: Tokens.rounding.full
         color: Colours.tPalette.m3surfaceContainer
         visible: Audio.sink !== null
+        opacity: root.stage(3)
+        transform: Translate {
+            y: (1 - root.stage(3)) * 26
+        }
 
         StateLayer {
             radius: parent.radius
@@ -304,6 +346,11 @@ ColumnLayout {
     // --- Row 3: Super devices ----------------------------------------------------------------
     SuperDevices {
         Layout.fillWidth: true
+        active: root.shown
+        opacity: root.stage(4)
+        transform: Translate {
+            y: (1 - root.stage(4)) * 28
+        }
     }
 
     // A wide tile: icon in a circle, name and state. The shape squares off a little when on.

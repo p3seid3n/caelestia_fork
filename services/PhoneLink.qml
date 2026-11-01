@@ -3,6 +3,9 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Caelestia
+import Caelestia.I18n
+import qs.utils
 
 // Phones and tablets paired through KDE Connect (for "Super devices" in quick settings).
 // Nothing runs unless something on screen uses it (addUser() / removeUser()), and then
@@ -19,6 +22,16 @@ Singleton {
     // Device waiting for a file from the picker (utilities/Wrapper.qml owns the picker, so it
     // survives the panel closing).
     property string shareTarget
+
+    // Huawei-style links (dragging a device onto this PC in Super devices):
+    //   tablet -> drawing tablet / second screen through Weylus; its browser opens the page itself
+    //   phone  -> its screen in a window through scrcpy (needs USB debugging or `adb pair` once)
+    property bool hasWeylus
+    property bool hasScrcpy
+    property string extendedTo // device id Weylus was started for
+    property string mirroring // device id scrcpy was started for
+    // Weylus' access code, made once and kept (only sent to your own devices).
+    property string accessCode
 
     signal shareRequested
 
@@ -48,6 +61,41 @@ Singleton {
     // Sends a file (or opens a link) on the device.
     function share(id: string, path: string): void {
         run(["-d", id, "--share", path]);
+    }
+
+    // Starts Weylus (headless, Wayland capture) and opens its page on the tablet, with the code.
+    function extend(id: string): void {
+        if (!hasWeylus)
+            return;
+        if (!accessCode)
+            accessCode = String(Math.floor(100000 + Math.random() * 900000));
+        extendedTo = id;
+        Quickshell.execDetached(["sh", "-c", `
+            pgrep -x weylus >/dev/null || (weylus --no-gui --auto-start --wayland-support --access-code "$2" >/dev/null 2>&1 &)
+            ip=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \\([0-9.]*\\).*/\\1/p')
+            sleep 1
+            [ -n "$ip" ] && kdeconnect-cli -d "$1" --share "http://$ip:1701/?access_code=$2"
+        `, "sh", id, accessCode]);
+        saveTimer.restart();
+    }
+
+    function stopExtend(): void {
+        extendedTo = "";
+        Quickshell.execDetached(["pkill", "-x", "weylus"]);
+    }
+
+    // Shows the phone's screen in a window (scrcpy over adb).
+    function mirror(id: string, name: string): void {
+        if (!hasScrcpy)
+            return;
+        mirroring = id;
+        mirrorProc.command = ["scrcpy", "--window-title", name || "Phone", "--stay-awake", "--turn-screen-off"];
+        mirrorProc.running = true;
+    }
+
+    function stopMirror(): void {
+        mirroring = "";
+        mirrorProc.running = false;
     }
 
     function requestShare(id: string): void {
@@ -87,9 +135,41 @@ Singleton {
     }
 
     Process {
+        id: mirrorProc
+
+        onExited: code => {
+            if (root.mirroring !== "" && code !== 0 && code !== 15)
+                Toaster.toast(Tr.tr("Phone screen"), Tr.tr("Couldn't reach the phone over adb. Turn on USB debugging (or run adb pair once), then try again."), "mobile_off");
+            root.mirroring = "";
+        }
+    }
+
+    Timer {
+        id: saveTimer
+
+        interval: 300
+        onTriggered: codeFile.setText(JSON.stringify({
+                accessCode: root.accessCode
+            }))
+    }
+
+    FileView {
+        id: codeFile
+
+        printErrors: false
+        path: `${Paths.state}/phonelink.json`
+        onLoaded: {
+            try {
+                root.accessCode = JSON.parse(text()).accessCode ?? "";
+            } catch (e) {}
+        }
+    }
+
+    Process {
         id: listProc
 
         command: ["sh", "-c", `
+            printf '#tools\\t%s\\t%s\\n' "$(command -v weylus >/dev/null && echo 1)" "$(command -v scrcpy >/dev/null && echo 1)"
             command -v kdeconnect-cli >/dev/null 2>&1 || exit 3
             prop() { busctl --user get-property org.kde.kdeconnect "$1" "$2" "$3" 2>/dev/null | cut -d' ' -f2- | tr -d '"'; }
             kdeconnect-cli -l --id-name-only 2>/dev/null | while read -r id name; do
@@ -107,6 +187,11 @@ Singleton {
                 const list = [];
                 for (const line of text.split("\n")) {
                     const f = line.split("\t");
+                    if (f[0] === "#tools") {
+                        root.hasWeylus = f[1] === "1";
+                        root.hasScrcpy = f[2] === "1";
+                        continue;
+                    }
                     if (f.length < 6 || !f[0])
                         continue;
                     const charge = parseInt(f[4]);

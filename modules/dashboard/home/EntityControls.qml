@@ -354,6 +354,7 @@ GridLayout {
 
     // --- Sensors: when it last changed ----------------------------------------
     StyledText {
+        elide: Text.ElideRight
         Layout.columnSpan: root.wide ? 2 : 1
         visible: root.level >= 2 && root.can.value && !!root.entity?.last_changed
         Layout.fillWidth: true
