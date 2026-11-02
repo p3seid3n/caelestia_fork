@@ -35,7 +35,7 @@ Item {
         anchors.right: parent.right
         anchors.margins: Tokens.padding.extraSmall
 
-        implicitHeight: Math.max(count.implicitHeight, titleText.implicitHeight)
+        implicitHeight: Math.max(count.implicitHeight, titleText.implicitHeight, clearBtn.implicitHeight)
 
         StyledText {
             id: count
@@ -65,14 +65,43 @@ Item {
 
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: count.right
-            anchors.right: parent.right
+            anchors.right: clearBtn.left
             anchors.leftMargin: Tokens.spacing.extraSmall
+            anchors.rightMargin: Tokens.spacing.small
 
             // TRANSLATORS: the count itself is rendered separately, immediately to the left
             text: root.notifCount > 0 ? Tr.trCtxN("notification", "notifications", root.notifCount, "notification count label, number shown separately") : Tr.tr("Notifications")
             color: Colours.palette.m3outline
             font: Tokens.font.label.large
             elide: Text.ElideRight
+        }
+
+        // KairosOS: clearing sits in this header instead of floating over the list, where it
+        // used to cover the last notification.
+        IconTextButton {
+            id: clearBtn
+
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            type: IconTextButton.Tonal
+            icon: "clear_all"
+            text: Tr.tr("Clear all")
+            opacity: root.notifCount > 0 ? 1 : 0
+            scale: root.notifCount > 0 ? 1 : 0.8
+            visible: opacity > 0
+            onClicked: clearTimer.start()
+
+            Behavior on opacity {
+                Anim {
+                    type: Anim.DefaultEffects
+                }
+            }
+
+            Behavior on scale {
+                Anim {
+                    type: Anim.FastSpatial
+                }
+            }
         }
     }
 
@@ -170,44 +199,6 @@ Item {
                     interval = 5;
                     return;
                 }
-            }
-        }
-    }
-
-    Loader {
-        asynchronous: true
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.margins: Tokens.padding.medium
-
-        scale: root.notifCount > 0 ? 1 : 0.5
-        opacity: root.notifCount > 0 ? 1 : 0
-        active: opacity > 0
-
-        sourceComponent: IconButton {
-            id: clearBtn
-
-            icon: "clear_all"
-            font: Tokens.font.icon.large
-            onClicked: clearTimer.start()
-
-            Elevation {
-                anchors.fill: parent
-                radius: parent.radius
-                z: -1
-                level: clearBtn.stateLayer.containsMouse ? 4 : 3
-            }
-        }
-
-        Behavior on scale {
-            Anim {
-                type: Anim.FastSpatial
-            }
-        }
-
-        Behavior on opacity {
-            Anim {
-                type: Anim.DefaultEffects
             }
         }
     }

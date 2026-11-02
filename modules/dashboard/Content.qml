@@ -75,24 +75,65 @@ Item {
                 enabled: Config.dashboard.showWeather
             }
         })
-    readonly property var dashboardTabs: DashboardLayout.visibleTabs.map(id => tabDefs[id]).filter(tab => tab && tab.enabled)
+    // The shown tabs' ids, in order, and their definitions (for the tab bar).
+    readonly property var tabIds: DashboardLayout.visibleTabs.filter(id => tabDefs[id]?.enabled ?? false)
+    readonly property var dashboardTabs: tabIds.map(id => tabDefs[id])
+    // Every tab there is; each has one pane for good, which only moves when the order changes.
+    readonly property var allIds: ["calendar", "todo", "home", "dashboard", "classic", "media", "performance", "weather"]
+    // The tab that was on screen, so it stays selected when tabs are added, removed or moved.
+    property string currentId
+    property bool remapping
 
     // While customising, the sheet sets the height; the width never shrinks below the current tab's.
     readonly property real nonAnimWidth: (customizing ? Math.max(view.implicitWidth, sheet.implicitWidth) : view.implicitWidth) + viewWrapper.anchors.margins * 2
     readonly property real nonAnimHeight: tabs.implicitHeight + tabs.anchors.topMargin + (customizing ? sheet.implicitHeight : view.implicitHeight) + viewWrapper.anchors.margins * 2
 
+    // Where the pane in `slot` starts: the widths of the panes before it.
+    function paneX(slot: int): real {
+        let x = 0;
+        for (let i = 0; i < repeater.count; i++) {
+            const p = repeater.itemAt(i);
+            if (p && p.slot >= 0 && p.slot < slot)
+                x += p.implicitWidth;
+        }
+        return x;
+    }
+
+    function paneAt(slot: int): Item {
+        for (let i = 0; i < repeater.count; i++) {
+            const p = repeater.itemAt(i);
+            if (p && p.slot === slot)
+                return p;
+        }
+        return null;
+    }
+
     implicitWidth: nonAnimWidth
     implicitHeight: nonAnimHeight
 
-    // Keep the selection valid when tabs are switched off.
-    onDashboardTabsChanged: {
-        if (screenState.dashboardTab >= dashboardTabs.length)
-            screenState.dashboardTab = Math.max(0, dashboardTabs.length - 1);
+    // Tabs switched on, off or moved: the tab on screen stays selected (or the nearest one).
+    onTabIdsChanged: {
+        const at = tabIds.indexOf(currentId);
+        const next = at >= 0 ? at : Math.max(0, Math.min(screenState.dashboardTab, tabIds.length - 1));
+        if (next !== screenState.dashboardTab) {
+            remapping = true;
+            screenState.dashboardTab = next;
+            remapping = false;
+        }
+        currentId = tabIds[screenState.dashboardTab] ?? "";
     }
+    Component.onCompleted: currentId = tabIds[screenState.dashboardTab] ?? ""
 
     // Picking a tab leaves the customise sheet.
     Connections {
         function onDashboardTabChanged(): void {
+            if (root.remapping)
+                return;
+            // The tab bar also follows a moved tab; that is not picking another tab.
+            const id = root.tabIds[root.screenState.dashboardTab] ?? "";
+            if (id === root.currentId)
+                return;
+            root.currentId = id;
             root.customizing = false;
         }
 
@@ -139,13 +180,10 @@ Item {
             id: view
 
             readonly property int currentIndex: root.screenState.dashboardTab
-            // Bumped whenever the Repeater adds or removes a pane, so currentItem never stays
-            // null when a pane arrives after the count changed.
-            property int paneVersion
             readonly property Item currentItem: {
-                repeater.count; // Trigger update on count change
-                paneVersion;
-                return repeater.itemAt(currentIndex);
+                repeater.count;
+                root.tabIds;
+                return root.paneAt(currentIndex);
             }
 
             anchors.fill: parent
@@ -158,8 +196,8 @@ Item {
             implicitHeight: currentItem?.implicitHeight ?? 0
 
             contentX: currentItem?.x ?? 0
-            contentWidth: row.implicitWidth
-            contentHeight: row.implicitHeight
+            contentWidth: row.width
+            contentHeight: row.height
 
             onContentXChanged: {
                 if (!moving || !currentItem)
@@ -185,27 +223,37 @@ Item {
                     contentX = Qt.binding(() => currentItem?.x ?? 0);
             }
 
-            RowLayout {
+            // One pane per tab, placed side by side in the tab bar's order (hidden tabs take no
+            // room). The panes never get swapped between tabs, so a tab that is switched on or moved
+            // keeps (or gets) its own content.
+            Item {
                 id: row
+
+                width: root.paneX(root.tabIds.length)
+                height: {
+                    let h = 0;
+                    for (let i = 0; i < repeater.count; i++)
+                        h = Math.max(h, repeater.itemAt(i)?.implicitHeight ?? 0);
+                    return h;
+                }
 
                 Repeater {
                     id: repeater
 
-                    onItemAdded: view.paneVersion++
-                    onItemRemoved: view.paneVersion++
-
-                    model: ScriptModel {
-                        values: root.dashboardTabs
-                    }
+                    model: root.allIds
 
                     delegate: Loader {
                         id: paneLoader
 
-                        required property int index
-                        required property var modelData
+                        required property string modelData
+                        readonly property var def: root.tabDefs[modelData]
+                        // Position in the tab bar; -1 while the tab is hidden.
+                        readonly property int slot: root.tabIds.indexOf(modelData)
                         // Whether the pane is on screen (or being swiped in).
                         readonly property bool inView: {
-                            if (index === view.currentIndex)
+                            if (slot < 0)
+                                return false;
+                            if (slot === view.currentIndex)
                                 return true;
                             const vx = Math.floor(view.visibleArea.xPosition * view.contentWidth);
                             const vex = Math.floor(vx + view.visibleArea.widthRatio * view.contentWidth);
@@ -215,9 +263,9 @@ Item {
                         // screen it is fully transparent, which the renderer skips.
                         property bool built
 
-                        Layout.alignment: Qt.AlignTop
-
-                        sourceComponent: modelData.component
+                        x: slot >= 0 ? root.paneX(slot) : 0
+                        visible: slot >= 0
+                        sourceComponent: def?.component ?? null
                         // Nothing is built before the binding below decides (a Loader starts
                         // active, which used to build every tab once at start).
                         active: false
@@ -226,7 +274,8 @@ Item {
                         onLoaded: built = true
                         // Light tabs stay; tabs that keep working in the background (media
                         // visualiser, performance graphs) go when the dashboard closes, as before.
-                        Component.onCompleted: active = Qt.binding(() => (built && (modelData.keepAlive ?? false)) || (inView && (root.screenState.dashboard || (modelData.keepAlive ?? false))))
+                        // A hidden tab is let go.
+                        Component.onCompleted: active = Qt.binding(() => slot >= 0 && ((built && (def?.keepAlive ?? false)) || (inView && (root.screenState.dashboard || (def?.keepAlive ?? false)))))
                     }
                 }
             }
