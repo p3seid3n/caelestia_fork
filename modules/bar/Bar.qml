@@ -72,7 +72,7 @@ ColumnLayout {
             // The file dock under the clock
             const dock = (ch.item as Item)?.dock as Item; // qmllint disable missing-property
             const at = dock ? mapToItem(dock, 0, y).y : -1;
-            if (dock && FileDock.items.length > 0 && at >= 0 && at <= dock.height) {
+            if (dock && at >= 0 && at <= dock.height) {
                 popouts.currentName = "filedock";
                 popouts.currentCenter = Qt.binding(() => dock.mapToItem(root, 0, dock.height / 2).y);
                 popouts.hasCurrent = true;

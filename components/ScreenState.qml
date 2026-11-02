@@ -19,4 +19,6 @@ PersistentProperties {
     property date dashboardDate: new Date()
     // KairosOS: a dashboard tab with text fields (Home) needs keyboard focus
     property bool dashboardInput
+    // KairosOS: quick settings is asking for a Wi-Fi password
+    property bool utilitiesInput
 }

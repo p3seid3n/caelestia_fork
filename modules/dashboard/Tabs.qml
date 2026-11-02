@@ -2,8 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Templates
-import Quickshell
 import Caelestia.Config
 import qs.components
 import qs.components.controls
@@ -16,47 +14,36 @@ Item {
     required property ScreenState screenState
     required property var tabs
 
-    readonly property alias count: bar.count
-    // Width left for the tabs once the customise button has its share.
-    readonly property real stripWidth: nonAnimWidth - customize.width - Tokens.spacing.small
+    readonly property int count: repeater.count
 
     signal customizeRequested
 
     implicitHeight: bar.implicitHeight + bar.anchors.topMargin + indicator.implicitHeight + indicator.anchors.topMargin + separator.implicitHeight
 
-    TabBar {
+    // The tab buttons. A plain row (not a TabBar): each button knows its own index in the list, so
+    // switching tabs on, off or moving them never leaves a button pointing at the wrong tab.
+    RowLayout {
         id: bar
+
+        readonly property Item currentItem: {
+            repeater.count;
+            root.tabs;
+            return repeater.itemAt(root.screenState.dashboardTab);
+        }
 
         anchors.left: parent.left
         anchors.right: customize.left
         anchors.rightMargin: Tokens.spacing.small
         anchors.top: parent.top
         anchors.topMargin: Tokens.sizes.dashboard.tabIndicatorSpacing
-
-        currentIndex: root.screenState.dashboardTab
-        onCurrentIndexChanged: root.screenState.dashboardTab = currentIndex
-
-        implicitHeight: contentHeight
-        background: null
-        contentItem: RowLayout {
-            spacing: 0
-
-            Repeater {
-                model: bar.contentModel
-            }
-        }
+        spacing: 0
 
         Repeater {
-            model: ScriptModel {
-                values: root.tabs
-            }
+            id: repeater
 
-            delegate: Tab {
-                required property var modelData
+            model: root.tabs
 
-                iconName: modelData.iconName
-                text: modelData.text
-            }
+            Tab {}
         }
     }
 
@@ -79,20 +66,12 @@ Item {
         anchors.top: bar.bottom
         anchors.topMargin: 5
 
-        implicitWidth: {
-            const tab = bar.currentItem;
-            if (tab)
-                return tab.implicitWidth;
-            const width = (root.stripWidth - bar.spacing * (bar.count - 1)) / bar.count;
-            return width;
-        }
+        implicitWidth: bar.currentItem?.contentWidth ?? 0
         implicitHeight: 3
 
         x: {
             const tab = bar.currentItem;
-            const width = (root.stripWidth - bar.spacing * (bar.count - 1)) / bar.count;
-            const tabWidth = tab?.implicitWidth ?? width;
-            return width * bar.currentIndex + (width - tabWidth) / 2;
+            return tab ? bar.x + tab.x + (tab.width - tab.contentWidth) / 2 : 0;
         }
 
         clip: true
@@ -127,48 +106,53 @@ Item {
         color: Colours.palette.m3outlineVariant
     }
 
-    component Tab: TabButton {
+    component Tab: Item {
         id: tab
 
-        required property string iconName
-        readonly property bool current: TabBar.tabBar.currentItem === this
+        required property var modelData
+        required property int index
+        readonly property bool current: root.screenState.dashboardTab === index
+        readonly property real contentWidth: mouse.implicitWidth
 
         Layout.fillWidth: true
         Layout.preferredWidth: 1 // Uniform width across all tabs
-        implicitWidth: implicitContentWidth
-        implicitHeight: implicitContentHeight
-        background: null
+        implicitWidth: mouse.implicitWidth
+        implicitHeight: mouse.implicitHeight
 
-        contentItem: CustomMouseArea {
+        CustomMouseArea {
             id: mouse
 
             function onWheel(event: WheelEvent): void {
                 if (event.angleDelta.y < 0)
-                    root.screenState.dashboardTab = Math.min(root.screenState.dashboardTab + 1, bar.count - 1);
+                    root.screenState.dashboardTab = Math.min(root.screenState.dashboardTab + 1, root.count - 1);
                 else if (event.angleDelta.y > 0)
                     root.screenState.dashboardTab = Math.max(root.screenState.dashboardTab - 1, 0);
             }
 
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
             implicitWidth: Math.max(icon.width, label.width)
             implicitHeight: icon.height + label.height
+            width: implicitWidth
+            height: implicitHeight
 
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
 
-            onPressed: root.screenState.dashboardTab = tab.TabBar.index
+            onPressed: root.screenState.dashboardTab = tab.index
 
             StateLayer {
                 id: stateLayer
 
                 anchors.fill: undefined
-                anchors.left: parent.left
-                anchors.right: parent.right
+                anchors.horizontalCenter: parent.horizontalCenter
                 anchors.verticalCenter: parent.verticalCenter
+                implicitWidth: tab.width
                 implicitHeight: parent.height + Tokens.sizes.dashboard.tabIndicatorSpacing * 2
 
                 radius: Tokens.rounding.medium
                 color: tab.current ? Colours.palette.m3primary : Colours.palette.m3onSurface
-                onClicked: root.screenState.dashboardTab = tab.TabBar.index
+                onClicked: root.screenState.dashboardTab = tab.index
             }
 
             MaterialIcon {
@@ -177,7 +161,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: label.top
 
-                text: tab.iconName
+                text: tab.modelData.iconName
                 color: tab.current ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
                 fill: tab.current ? 1 : 0
                 fontStyle: Tokens.font.icon.medium
@@ -195,7 +179,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
 
-                text: tab.text
+                text: tab.modelData.text
                 color: tab.current ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
             }
         }

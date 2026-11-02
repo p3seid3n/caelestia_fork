@@ -26,6 +26,9 @@ Singleton {
     readonly property list<string> watched: [`${Paths.pictures}/Screenshots`, Paths.pictures, `${Paths.home}/Desktop`]
     readonly property double startedAt: Date.now()
 
+    // The dock's "+" asks for a file (the bar owns the picker, so it outlives the popout).
+    signal pickRequested
+
     function isImage(path: string): bool {
         return /\.(png|jpe?g|webp|gif|bmp|avif|jxl|svg)$/i.test(path);
     }
@@ -86,6 +89,38 @@ Singleton {
     function addUrls(urls: var): void {
         for (const u of Array.from(urls ?? []).reverse())
             add(String(u), "file");
+    }
+
+    // Local files in a drag or drop: its URLs, or (some apps only send text) file paths in its text.
+    function filesIn(event: var): var {
+        const urls = Array.from(event.urls ?? []).map(u => String(u)).filter(u => u.startsWith("file://"));
+        if (urls.length > 0)
+            return urls;
+        const text = String(event.text ?? event.getDataAsString?.("text/uri-list") ?? "");
+        return text.split(/\r?\n/).map(l => l.trim()).filter(l => l.startsWith("file://") || l.startsWith("/"));
+    }
+
+    // DropArea.onEntered: takes drags that carry files (not a drag out of the dock itself).
+    function enter(drag: var): void {
+        const files = drag.hasUrls || drag.hasText || (drag.formats ?? []).includes("text/uri-list");
+        if (!files || dragging) {
+            drag.accepted = false;
+            return;
+        }
+        dropHover = true;
+        drag.accept(Qt.CopyAction);
+    }
+
+    // DropArea.onDropped
+    function drop(event: var): void {
+        dropHover = false;
+        if (dragging)
+            return;
+        const files = filesIn(event);
+        if (files.length === 0)
+            return;
+        addUrls(files);
+        event.accept(Qt.CopyAction);
     }
 
     function remove(path: string): void {

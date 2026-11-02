@@ -508,13 +508,22 @@ Singleton {
         if (!available || !loaded)
             return;
         if (lua) {
-            luaEval(`for _, w in ipairs(hl.get_windows({ tag = "kairosfloat" })) do
-                if w.floating then
-                    hl.dispatch(hl.dsp.window.float({ window = w, action = "disable" }))
-                end
-                hl.dispatch(hl.dsp.window.tag({ tag = "-kairosfloat", window = w }))
+            // Every window floating mode floated: tagged by hand when the mode was switched on
+            // ("kairosfloat") or by the rule while it was on ("kairosfloat*"; a tag filter in
+            // get_windows only finds the first kind). Collected first, as switching the rule off
+            // drops the rule's tags.
+            luaEval(runtimeLua() + `
+            local back = {}
+            for _, w in ipairs(hl.get_windows()) do
+                if KAIROS.tagged(w) then back[#back + 1] = w end
             end
-            if KAIROS_FLOAT ~= nil then KAIROS_FLOAT:set_enabled(false) end`);
+            if KAIROS_FLOAT ~= nil then KAIROS_FLOAT:set_enabled(false) end
+            for _, w in ipairs(back) do
+                if w.floating and not w.pinned then
+                    pcall(hl.dispatch, hl.dsp.window.float({ window = w, action = "disable" }))
+                end
+                pcall(hl.dispatch, hl.dsp.window.tag({ tag = "-kairosfloat", window = w }))
+            end`);
         } else {
             const msgs = floated.map(a => `dispatch settiled address:${a}`);
             floated = [];

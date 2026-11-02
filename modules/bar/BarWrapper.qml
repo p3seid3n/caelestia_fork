@@ -3,7 +3,9 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Caelestia.Config
+import Caelestia.I18n
 import qs.components
+import qs.components.filedialog
 import qs.services
 import qs.utils
 import qs.modules.bar.popouts as BarPopouts
@@ -24,6 +26,11 @@ Item {
     readonly property int exclusiveZone: !disabled && (Config.bar.persistent || screenState.bar) ? contentWidth : Config.border.thickness
     readonly property bool shouldBeVisible: !fullscreen && !disabled && (Config.bar.persistent || screenState.bar || isHovered)
     property bool isHovered
+    // File dock → "+": add a file by picking it.
+    readonly property FileDialog dockPicker: FileDialog {
+        title: Tr.tr("Add to the file dock")
+        onAccepted: path => FileDock.add(path, "file")
+    }
 
     function closeTray(): void {
         (content.item as Bar)?.closeTray();
@@ -72,26 +79,21 @@ Item {
         }
     ]
 
+    Connections {
+        function onPickRequested(): void {
+            root.dockPicker.open();
+        }
+
+        target: FileDock
+    }
+
     // Files dragged onto the bar from other apps go into the file dock.
     DropArea {
         anchors.fill: parent
 
-        onEntered: drag => {
-            if (!drag.hasUrls || FileDock.dragging) {
-                drag.accepted = false;
-                return;
-            }
-            FileDock.dropHover = true;
-            drag.accept(Qt.CopyAction);
-        }
+        onEntered: drag => FileDock.enter(drag)
         onExited: FileDock.dropHover = false
-        onDropped: drop => {
-            FileDock.dropHover = false;
-            if (!drop.hasUrls || FileDock.dragging)
-                return;
-            FileDock.addUrls(drop.urls);
-            drop.accept(Qt.CopyAction);
-        }
+        onDropped: drop => FileDock.drop(drop)
     }
 
     Loader {

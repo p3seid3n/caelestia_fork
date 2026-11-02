@@ -6,24 +6,22 @@ import qs.services
 // The file dock in the bar: a small stack of the latest files (screenshots arrive here by
 // themselves), with how many there are. Hovering opens the whole dock (popouts/FileDockPopout);
 // the top file can be dragged straight out of the bar. While a file is dragged over the bar the
-// stack opens up as a drop target. Takes no room while it is empty.
+// stack opens up as a drop target. While empty it is just a small icon.
 Item {
     id: root
 
     readonly property var newest: FileDock.items[0] ?? null
     readonly property var second: FileDock.items[1] ?? null
-    readonly property bool showing: FileDock.items.length > 0 || FileDock.dropHover
-    // 0 hidden, 1 shown; the bar's spacing around it follows (Bar.qml).
-    property real reveal: showing ? 1 : 0
+    readonly property bool empty: FileDock.items.length === 0
+    // Always there (as a drop target and to open the dock); kept for Bar.qml's spacing.
+    readonly property real reveal: 1
 
     implicitWidth: Tokens.sizes.bar.innerWidth
-    implicitHeight: Math.round(46 * reveal)
-    clip: reveal < 1
-    opacity: reveal
+    implicitHeight: empty && !FileDock.dropHover ? 34 : 46
 
-    Behavior on reveal {
+    Behavior on implicitHeight {
         Anim {
-            type: Anim.DefaultSpatial
+            type: Anim.FastSpatial
         }
     }
 
@@ -32,7 +30,7 @@ Item {
 
         anchors.fill: parent
         radius: Tokens.rounding.full
-        color: FileDock.dropHover ? Colours.palette.m3primaryContainer : Colours.tPalette.m3surfaceContainer
+        color: FileDock.dropHover ? Colours.palette.m3primaryContainer : root.empty ? "transparent" : Colours.tPalette.m3surfaceContainer
         scale: FileDock.dropHover ? 1.06 : 1
 
         Behavior on scale {
@@ -78,6 +76,21 @@ Item {
         Behavior on scale {
             Anim {
                 type: Anim.FastSpatial
+            }
+        }
+    }
+
+    // Empty: just the dock's icon
+    MaterialIcon {
+        anchors.centerIn: parent
+        text: "inventory_2"
+        color: Colours.palette.m3onSurfaceVariant
+        opacity: root.empty && !FileDock.dropHover ? 0.8 : 0
+        fontStyle: Tokens.font.icon.small
+
+        Behavior on opacity {
+            Anim {
+                type: Anim.FastEffects
             }
         }
     }

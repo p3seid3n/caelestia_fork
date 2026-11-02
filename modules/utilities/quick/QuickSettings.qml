@@ -4,7 +4,6 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Bluetooth
-import Quickshell.Widgets
 import Quickshell.Services.UPower
 import Caelestia.Config
 import Caelestia.I18n
@@ -14,23 +13,29 @@ import qs.services
 import qs.utils
 import qs.modules.nexus
 
-// Quick settings (bottom-right panel), laid out like a phone's control centre:
-//   header     battery, date, settings and power
-//   row 1      Wi-Fi and Bluetooth as large tiles | what is playing (or the time)
-//   row 2      round toggles (focus, night light, keep awake, game mode, floating windows, dark
-//              mode, microphone, screen recording, VPN) | brightness and volume as tall sliders
-//   row 3      Super devices: this PC with its phones, earbuds and other devices around it
-// Only built while the panel is open (utilities/Wrapper.qml); nothing here polls on its own.
+// Quick settings (bottom-right panel): only the things you switch often.
+//   header        date, battery (laptops), settings, power
+//   connectivity  Wi-Fi and Bluetooth; the icon switches them on and off, the rest of the tile
+//                 opens the list of networks / devices underneath (join, connect, disconnect)
+//   toggles       focus, night light, keep awake, game mode, floating windows, dark mode,
+//                 screen recording, VPN
+//   Super devices this PC with the devices around it (SuperDevices.qml)
+// Media, volume and brightness live in the dashboard and the bar.
+// Built once after login (utilities/Wrapper.qml); nothing here polls on its own.
 ColumnLayout {
     id: root
 
     required property ScreenState screenState
 
-    readonly property var monitor: Brightness.getMonitorForScreen(screenState.modelData)
+    readonly property bool shown: screenState.utilities
     readonly property var btAdapter: Bluetooth.defaultAdapter // qmllint disable unresolved-type
     readonly property var btConnected: Bluetooth.devices.values.filter(d => d.connected) // qmllint disable unresolved-type
-    readonly property real sliderWidth: 64
-    readonly property bool shown: screenState.utilities
+    // The open list under the connectivity tiles: "net", "bt" or "" (closed).
+    property string expanded
+    // What the list shows; kept while it closes, so it doesn't empty mid-animation.
+    property string listShown
+    // Network asking for its password (inline field in the Wi-Fi list).
+    property string passwordFor
     // Opening: the rows rise into place one after another (0 -> 1).
     property real enter: 1
 
@@ -45,13 +50,33 @@ ColumnLayout {
         return 1 - Math.pow(1 - t, 3);
     }
 
+    function toggleList(which: string): void {
+        expanded = expanded === which ? "" : which;
+        if (expanded !== "")
+            listShown = expanded;
+        if (expanded === "net" && Nmcli.wifiEnabled)
+            Nmcli.rescanWifi();
+        if (expanded !== "net")
+            passwordFor = "";
+    }
+
     spacing: Tokens.spacing.medium
 
     onShownChanged: {
         if (shown) {
             enter = 0;
             enterAnim.restart();
+        } else {
+            expanded = "";
+            passwordFor = "";
         }
+    }
+
+    // Keyboard focus only while a password is being typed.
+    Binding {
+        target: root.screenState
+        property: "utilitiesInput"
+        value: root.passwordFor !== ""
     }
 
     NumberAnimation {
@@ -72,6 +97,17 @@ ColumnLayout {
         opacity: root.stage(0)
         transform: Translate {
             y: (1 - root.stage(0)) * 16
+        }
+
+        StyledText {
+            Layout.fillWidth: true
+            elide: Text.ElideRight
+            text: {
+                Time.hours;
+                return new Date().toLocaleDateString(Qt.locale(), "dddd, d MMMM");
+            }
+            font: Tokens.font.title.small
+            color: Colours.palette.m3onSurface
         }
 
         StyledRect {
@@ -103,17 +139,6 @@ ColumnLayout {
             }
         }
 
-        StyledText {
-            Layout.fillWidth: true
-            elide: Text.ElideRight
-            text: {
-                Time.hours;
-                return new Date().toLocaleDateString(Qt.locale(), "dddd, d MMMM");
-            }
-            font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
-            color: Colours.palette.m3onSurfaceVariant
-        }
-
         IconButton {
             type: IconButton.Text
             isRound: true
@@ -129,8 +154,8 @@ ColumnLayout {
         }
     }
 
-    // --- Row 1: connectivity and media ----------------------------------------------------
-    RowLayout {
+    // --- Connectivity ---------------------------------------------------------------------
+    ColumnLayout {
         Layout.fillWidth: true
         spacing: Tokens.spacing.small
         opacity: root.stage(1)
@@ -138,25 +163,28 @@ ColumnLayout {
             y: (1 - root.stage(1)) * 20
         }
 
-        ColumnLayout {
+        RowLayout {
             Layout.fillWidth: true
-            Layout.preferredWidth: 3
             spacing: Tokens.spacing.small
 
-            BigTile {
-                icon: Nmcli.wifiEnabled ? "wifi" : "wifi_off"
-                label: Tr.tr("Wi-Fi")
+            ConnTile {
+                key: "net"
+                icon: Nmcli.activeEthernet && !Nmcli.active ? "lan" : Nmcli.wifiEnabled ? Icons.getNetworkIcon(Nmcli.active?.strength ?? 100) : "wifi_off"
+                label: Nmcli.activeEthernet && !Nmcli.active ? Tr.tr("Ethernet") : Tr.tr("Wi-Fi")
                 sub: {
-                    if (!Nmcli.wifiEnabled)
-                        return Nmcli.activeEthernet ? Tr.tr("Ethernet") : Tr.tr("Off");
-                    return Nmcli.active?.ssid ?? (Nmcli.activeEthernet ? Tr.tr("Ethernet") : Tr.tr("Not connected"));
+                    if (Nmcli.active)
+                        return Nmcli.active.ssid;
+                    if (Nmcli.activeEthernet)
+                        return Nmcli.wifiEnabled ? Tr.tr("Connected · Wi-Fi on") : Tr.tr("Connected");
+                    return Nmcli.wifiEnabled ? Tr.tr("Not connected") : Tr.tr("Off");
                 }
-                checked: Nmcli.wifiEnabled
-                onClicked: Nmcli.toggleWifi()
+                checked: Nmcli.wifiEnabled || Nmcli.activeEthernet !== null
+                onToggled: Nmcli.toggleWifi()
             }
 
-            BigTile {
-                icon: root.btAdapter?.enabled ? "bluetooth" : "bluetooth_disabled"
+            ConnTile {
+                key: "bt"
+                icon: root.btAdapter?.enabled ? (root.btConnected.length > 0 ? "bluetooth_connected" : "bluetooth") : "bluetooth_disabled"
                 label: Tr.tr("Bluetooth")
                 sub: {
                     if (!root.btAdapter?.enabled)
@@ -164,208 +192,328 @@ ColumnLayout {
                     if (root.btConnected.length === 1)
                         return root.btConnected[0].name;
                     if (root.btConnected.length > 1)
-                        return Tr.trN("%n device", "%n devices", root.btConnected.length);
+                        return Tr.trN("%n devices", "%n devices", root.btConnected.length);
                     return Tr.tr("On");
                 }
                 checked: root.btAdapter?.enabled ?? false
-                onClicked: {
+                onToggled: {
                     if (root.btAdapter)
                         root.btAdapter.enabled = !root.btAdapter.enabled;
                 }
             }
         }
 
-        MediaCard {
+        // The open list
+        Item {
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            Layout.preferredWidth: 2
+            Layout.preferredHeight: root.expanded !== "" ? list.implicitHeight : 0
+            visible: Layout.preferredHeight > 0.5
+            opacity: root.expanded !== "" ? 1 : 0
+            clip: true
+
+            Behavior on Layout.preferredHeight {
+                Anim {
+                    type: Anim.DefaultSpatial
+                }
+            }
+
+            Behavior on opacity {
+                Anim {
+                    type: Anim.DefaultEffects
+                }
+            }
+
+            StyledRect {
+                id: list
+
+                width: parent.width
+                implicitHeight: listLoader.implicitHeight + Tokens.padding.small * 2
+                radius: Tokens.rounding.large
+                color: Colours.tPalette.m3surfaceContainer
+
+                Loader {
+                    id: listLoader
+
+                    x: Tokens.padding.small
+                    y: Tokens.padding.small
+                    width: parent.width - Tokens.padding.small * 2
+                    sourceComponent: root.listShown === "bt" ? btList : root.listShown === "net" ? netList : null
+                }
+            }
         }
     }
 
-    // --- Row 2: toggles and sliders ---------------------------------------------------------
-    RowLayout {
+    // --- Toggles --------------------------------------------------------------------------
+    GridLayout {
         Layout.fillWidth: true
-        spacing: Tokens.spacing.medium
+        columns: 2
+        columnSpacing: Tokens.spacing.small
+        rowSpacing: Tokens.spacing.small
+        uniformCellWidths: true
         opacity: root.stage(2)
         transform: Translate {
             y: (1 - root.stage(2)) * 24
         }
 
-        GridLayout {
-            Layout.fillWidth: true
-            Layout.alignment: Qt.AlignTop
-            columns: 4
-            columnSpacing: Tokens.spacing.small
-            rowSpacing: Tokens.spacing.small
-
-            RoundToggle {
-                icon: "do_not_disturb_on"
-                label: Tr.tr("Focus")
-                checked: Notifs.dnd
-                onClicked: Notifs.dnd = !Notifs.dnd
-            }
-
-            RoundToggle {
-                visible: NightLight.available
-                icon: "nightlight"
-                label: Tr.tr("Night light")
-                checked: NightLight.on
-                onClicked: NightLight.toggle()
-            }
-
-            RoundToggle {
-                icon: "coffee"
-                label: Tr.tr("Keep awake")
-                checked: IdleInhibitor.enabled
-                onClicked: IdleInhibitor.enabled = !IdleInhibitor.enabled
-            }
-
-            RoundToggle {
-                icon: "sports_esports"
-                label: Tr.tr("Game mode")
-                checked: GameMode.enabled
-                onClicked: GameMode.enabled = !GameMode.enabled
-            }
-
-            RoundToggle {
-                icon: WindowLayout.floating ? "select_window" : "grid_view"
-                label: WindowLayout.floating ? Tr.tr("Floating") : Tr.tr("Tiling")
-                checked: WindowLayout.floating
-                onClicked: WindowLayout.toggle()
-            }
-
-            RoundToggle {
-                icon: "dark_mode"
-                label: Tr.tr("Dark mode")
-                checked: !Colours.light
-                onClicked: Colours.setMode(Colours.light ? "dark" : "light")
-            }
-
-            RoundToggle {
-                icon: Audio.sourceMuted ? "mic_off" : "mic"
-                label: Tr.tr("Microphone")
-                checked: !Audio.sourceMuted
-                onClicked: {
-                    const audio = Audio.source?.audio;
-                    if (audio)
-                        audio.muted = !audio.muted;
-                }
-            }
-
-            RoundToggle {
-                icon: Recorder.running ? "stop_circle" : "screen_record"
-                label: Recorder.running ? `${String(Math.floor(Recorder.elapsed / 60)).padStart(2, "0")}:${String(Math.floor(Recorder.elapsed % 60)).padStart(2, "0")}` : Tr.tr("Record")
-                checked: Recorder.running
-                onClicked: Recorder.running ? Recorder.stop() : root.closeAnd(() => Recorder.start())
-            }
-
-            RoundToggle {
-                visible: GlobalConfig.utilities.vpn.selectedProvider.length > 0
-                icon: "vpn_key"
-                label: Tr.tr("VPN")
-                checked: VPN.connected
-                onClicked: VPN.toggle()
-            }
+        Toggle {
+            icon: "do_not_disturb_on"
+            label: Tr.tr("Focus")
+            checked: Notifs.dnd
+            onClicked: Notifs.dnd = !Notifs.dnd
         }
 
-        // Brightness and volume as tall sliders, like on a phone.
-        Item {
-            Layout.alignment: Qt.AlignTop
-            implicitWidth: root.monitor ? root.sliderWidth * 2 + Tokens.spacing.small : root.sliderWidth
-            implicitHeight: 152
+        Toggle {
+            visible: NightLight.available
+            icon: "nightlight"
+            label: Tr.tr("Night light")
+            checked: NightLight.on
+            onClicked: NightLight.toggle()
+        }
 
-            FilledSlider {
-                visible: root.monitor !== undefined && root.monitor !== null
-                x: 0
-                width: root.sliderWidth
-                height: parent.height
-                icon: `brightness_${(Math.round(value * 6) + 1)}`
-                value: root.monitor?.brightness ?? 0
-                onMoved: root.monitor?.setBrightness(value)
-            }
+        Toggle {
+            icon: "coffee"
+            label: Tr.tr("Keep awake")
+            checked: IdleInhibitor.enabled
+            onClicked: IdleInhibitor.enabled = !IdleInhibitor.enabled
+        }
 
-            FilledSlider {
-                anchors.right: parent.right
-                width: root.sliderWidth
-                height: parent.height
-                icon: Icons.getVolumeIcon(value, Audio.muted)
-                value: Audio.volume
-                to: GlobalConfig.services.maxVolume
-                onMoved: Audio.setVolume(value)
-            }
+        Toggle {
+            icon: "sports_esports"
+            label: Tr.tr("Game mode")
+            checked: GameMode.enabled
+            onClicked: GameMode.enabled = !GameMode.enabled
+        }
+
+        Toggle {
+            icon: WindowLayout.floating ? "select_window" : "grid_view"
+            label: Tr.tr("Floating windows")
+            checked: WindowLayout.floating
+            onClicked: WindowLayout.toggle()
+        }
+
+        Toggle {
+            icon: "dark_mode"
+            label: Tr.tr("Dark mode")
+            checked: !Colours.light
+            onClicked: Colours.setMode(Colours.light ? "dark" : "light")
+        }
+
+        Toggle {
+            icon: Recorder.running ? "stop_circle" : "screen_record"
+            label: Recorder.running ? `${String(Math.floor(Recorder.elapsed / 60)).padStart(2, "0")}:${String(Math.floor(Recorder.elapsed % 60)).padStart(2, "0")}` : Tr.tr("Record screen")
+            checked: Recorder.running
+            onClicked: Recorder.running ? Recorder.stop() : root.closeAnd(() => Recorder.start())
+        }
+
+        Toggle {
+            visible: GlobalConfig.utilities.vpn.selectedProvider.length > 0
+            icon: "vpn_key"
+            label: Tr.tr("VPN")
+            checked: VPN.connected
+            onClicked: VPN.toggle()
         }
     }
 
-    // Output device: click to switch to the next one.
-    StyledRect {
+    // --- Super devices --------------------------------------------------------------------
+    SuperDevices {
         Layout.fillWidth: true
-        implicitHeight: outputRow.implicitHeight + Tokens.padding.small * 2
-        radius: Tokens.rounding.full
-        color: Colours.tPalette.m3surfaceContainer
-        visible: Audio.sink !== null
+        active: root.shown
         opacity: root.stage(3)
         transform: Translate {
-            y: (1 - root.stage(3)) * 26
+            y: (1 - root.stage(3)) * 28
         }
+    }
 
-        StateLayer {
-            radius: parent.radius
-            onClicked: Audio.cycleNextAudioOutput()
-        }
+    // --- Lists -----------------------------------------------------------------------------
+    Component {
+        id: netList
 
-        RowLayout {
-            id: outputRow
+        ColumnLayout {
+            id: netColumn
 
-            anchors.fill: parent
-            anchors.leftMargin: Tokens.padding.large
-            anchors.rightMargin: Tokens.padding.large
-            spacing: Tokens.spacing.small
+            readonly property var networks: [...Nmcli.networks].sort((a, b) => (b.active - a.active) || (b.strength - a.strength)).slice(0, 6) // qmllint disable missing-property
 
-            MaterialIcon {
-                text: "speaker"
-                color: Colours.palette.m3onSurfaceVariant
-                fontStyle: Tokens.font.icon.small
+            spacing: 2
+
+            ListHeader {
+                title: Tr.tr("Wi-Fi")
+                checked: Nmcli.wifiEnabled
+                busy: Nmcli.scanning
+                onRefresh: Nmcli.rescanWifi()
+                onToggled: on => Nmcli.enableWifi(on)
+            }
+
+            ListRow {
+                visible: Nmcli.activeEthernet !== null
+                icon: "lan"
+                title: Tr.tr("Ethernet")
+                sub: Nmcli.activeEthernet?.ipAddress || Tr.tr("Connected")
+                active: true
+            }
+
+            Repeater {
+                model: ScriptModel {
+                    values: netColumn.networks
+                }
+
+                ColumnLayout {
+                    id: net
+
+                    required property var modelData
+                    readonly property bool asking: root.passwordFor === modelData.ssid
+
+                    Layout.fillWidth: true
+                    spacing: 2
+
+                    ListRow {
+                        icon: Icons.getNetworkIcon(net.modelData.strength)
+                        title: net.modelData.ssid
+                        sub: net.modelData.active ? Tr.tr("Connected") : net.modelData.isSecure ? Tr.tr("Secured") : Tr.tr("Open")
+                        trailing: net.modelData.isSecure && !net.modelData.active ? "lock" : ""
+                        active: net.modelData.active
+                        busy: Nmcli.connecting && Nmcli.connectingSsid() === net.modelData.ssid
+                        onClicked: {
+                            if (net.modelData.active)
+                                return;
+                            root.passwordFor = "";
+                            NetworkConnection.handleConnect(net.modelData, null, n => root.passwordFor = n.ssid);
+                        }
+                    }
+
+                    // Password, right under the network that asks for it.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Tokens.padding.small
+                        Layout.rightMargin: Tokens.padding.small
+                        Layout.bottomMargin: Tokens.padding.small
+                        visible: net.asking
+                        spacing: Tokens.spacing.small
+
+                        StyledTextField {
+                            id: password
+
+                            Layout.fillWidth: true
+                            placeholderText: Tr.tr("Password")
+                            leadingIcon: "key"
+                            echoMode: TextInput.Password
+                            onVisibleChanged: {
+                                text = "";
+                                if (visible)
+                                    forceActiveFocus();
+                            }
+                            onAccepted: {
+                                if (password.text.length >= 8)
+                                    join.clicked();
+                            }
+                        }
+
+                        TextButton {
+                            id: join
+
+                            type: TextButton.Filled
+                            text: Tr.tr("Join")
+                            disabled: password.text.length < 8
+                            onClicked: {
+                                NetworkConnection.connectWithPassword(net.modelData, password.text, null);
+                                root.passwordFor = "";
+                            }
+                        }
+                    }
+                }
             }
 
             StyledText {
                 Layout.fillWidth: true
-                elide: Text.ElideRight
-                text: Audio.sink?.description || Audio.sink?.nickName || Audio.sink?.name || ""
+                Layout.margins: Tokens.padding.small
+                visible: Nmcli.wifiEnabled && netColumn.networks.length === 0
+                wrapMode: Text.WordWrap
+                text: Nmcli.scanning ? Tr.tr("Looking for networks...") : Tr.tr("No networks found")
                 font: Tokens.font.body.small
-                color: Colours.palette.m3onSurface
-            }
-
-            MaterialIcon {
-                text: "swap_horiz"
                 color: Colours.palette.m3onSurfaceVariant
-                fontStyle: Tokens.font.icon.small
+            }
+
+            SettingsLink {
+                text: Tr.tr("Network settings")
             }
         }
     }
 
-    // --- Row 3: Super devices ----------------------------------------------------------------
-    SuperDevices {
-        Layout.fillWidth: true
-        active: root.shown
-        opacity: root.stage(4)
-        transform: Translate {
-            y: (1 - root.stage(4)) * 28
+    Component {
+        id: btList
+
+        ColumnLayout {
+            id: btColumn
+
+            readonly property var devices: Bluetooth.devices.values.filter(d => d.paired || d.connected).sort((a, b) => (b.connected - a.connected) || a.name.localeCompare(b.name)).slice(0, 6) // qmllint disable unresolved-type
+
+            spacing: 2
+
+            ListHeader {
+                title: Tr.tr("Bluetooth")
+                checked: root.btAdapter?.enabled ?? false
+                showRefresh: false
+                onToggled: on => {
+                    if (root.btAdapter)
+                        root.btAdapter.enabled = on;
+                }
+            }
+
+            Repeater {
+                model: ScriptModel {
+                    values: btColumn.devices
+                }
+
+                ListRow {
+                    required property var modelData
+                    readonly property bool changing: modelData.state === BluetoothDeviceState.Connecting || modelData.state === BluetoothDeviceState.Disconnecting // qmllint disable unresolved-type
+
+                    icon: Icons.getBluetoothIcon(modelData.icon)
+                    title: modelData.name
+                    sub: {
+                        if (changing)
+                            return modelData.connected ? Tr.tr("Disconnecting...") : Tr.tr("Connecting...");
+                        if (!modelData.connected)
+                            return Tr.tr("Not connected");
+                        return modelData.batteryAvailable ? Tr.tr("Connected · %1%").arg(Math.round(modelData.battery * 100)) : Tr.tr("Connected");
+                    }
+                    active: modelData.connected
+                    busy: changing
+                    onClicked: modelData.connected = !modelData.connected
+                }
+            }
+
+            StyledText {
+                Layout.fillWidth: true
+                Layout.margins: Tokens.padding.small
+                visible: (root.btAdapter?.enabled ?? false) && btColumn.devices.length === 0
+                wrapMode: Text.WordWrap
+                text: Tr.tr("No paired devices yet")
+                font: Tokens.font.body.small
+                color: Colours.palette.m3onSurfaceVariant
+            }
+
+            SettingsLink {
+                text: Tr.tr("Pair a new device")
+            }
         }
     }
 
-    // A wide tile: icon in a circle, name and state. The shape squares off a little when on.
-    component BigTile: StyledRect {
+    // A connectivity tile: the round icon switches it on/off, the rest opens its list.
+    component ConnTile: StyledRect {
         id: tile
 
+        required property string key
         property string icon
         property string label
         property string sub
         property bool checked
+        readonly property bool open: root.expanded === key
 
-        signal clicked
+        signal toggled
 
         Layout.fillWidth: true
-        implicitHeight: 64
+        Layout.preferredWidth: 1
+        implicitHeight: 68
         radius: checked ? Tokens.rounding.large : Tokens.rounding.full
         color: checked ? Colours.palette.m3primaryContainer : Colours.tPalette.m3surfaceContainerHigh
 
@@ -378,100 +526,31 @@ ColumnLayout {
         StateLayer {
             radius: tile.radius
             color: tile.checked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurface
-            onClicked: tile.clicked()
+            onClicked: root.toggleList(tile.key)
         }
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: Tokens.padding.small + 2
-            anchors.rightMargin: Tokens.padding.large
-            spacing: Tokens.spacing.medium
-
-            StyledRect {
-                implicitWidth: 44
-                implicitHeight: 44
-                radius: Tokens.rounding.full
-                color: tile.checked ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainerHighest
-
-                MaterialIcon {
-                    anchors.centerIn: parent
-                    text: tile.icon
-                    fill: tile.checked ? 1 : 0
-                    color: tile.checked ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
-                    fontStyle: Tokens.font.icon.medium
-
-                    Behavior on fill {
-                        Anim {
-                            type: Anim.DefaultEffects
-                        }
-                    }
-                }
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 0
-
-                StyledText {
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    text: tile.label
-                    font: Tokens.font.body.builders.medium.weight(Font.DemiBold).build()
-                    color: tile.checked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurface
-                }
-
-                StyledText {
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    text: tile.sub
-                    font: Tokens.font.body.small
-                    color: tile.checked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
-                    opacity: 0.85
-                }
-            }
-        }
-    }
-
-    // A round toggle with its name underneath.
-    component RoundToggle: Item {
-        id: toggle
-
-        property string icon
-        property string label
-        property bool checked
-
-        signal clicked
-
-        Layout.fillWidth: true
-        implicitWidth: 56
-        implicitHeight: circle.height + name.implicitHeight + Tokens.spacing.extraSmall
 
         StyledRect {
-            id: circle
+            id: iconCircle
 
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: 50
-            height: 50
-            radius: toggle.checked ? Tokens.rounding.large : Tokens.rounding.full
-            color: toggle.checked ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainerHigh
-
-            Behavior on radius {
-                Anim {
-                    type: Anim.FastSpatial
-                }
-            }
+            anchors.left: parent.left
+            anchors.leftMargin: Tokens.padding.small + 2
+            anchors.verticalCenter: parent.verticalCenter
+            implicitWidth: 44
+            implicitHeight: 44
+            radius: Tokens.rounding.full
+            color: tile.checked ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainerHighest
 
             StateLayer {
-                radius: circle.radius
-                color: toggle.checked ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
-                onClicked: toggle.clicked()
+                radius: Tokens.rounding.full
+                color: tile.checked ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
+                onClicked: tile.toggled()
             }
 
             MaterialIcon {
                 anchors.centerIn: parent
-                text: toggle.icon
-                fill: toggle.checked ? 1 : 0
-                color: toggle.checked ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                text: tile.icon
+                fill: tile.checked ? 1 : 0
+                color: tile.checked ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
                 fontStyle: Tokens.font.icon.medium
 
                 Behavior on fill {
@@ -482,120 +561,236 @@ ColumnLayout {
             }
         }
 
-        StyledText {
-            id: name
+        ColumnLayout {
+            anchors.left: iconCircle.right
+            anchors.right: chevron.left
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.leftMargin: Tokens.spacing.medium
+            anchors.rightMargin: Tokens.spacing.extraSmall
+            spacing: 0
 
-            anchors.top: circle.bottom
-            anchors.topMargin: Tokens.spacing.extraSmall
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: parent.width + Tokens.spacing.small
-            horizontalAlignment: Text.AlignHCenter
-            elide: Text.ElideRight
-            text: toggle.label
-            font: Tokens.font.label.small
-            color: Colours.palette.m3onSurfaceVariant
+            StyledText {
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+                text: tile.label
+                font: Tokens.font.body.builders.medium.weight(Font.DemiBold).build()
+                color: tile.checked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurface
+            }
+
+            StyledText {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                text: tile.sub
+                font: Tokens.font.body.small
+                color: tile.checked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
+                opacity: 0.85
+            }
+        }
+
+        MaterialIcon {
+            id: chevron
+
+            anchors.right: parent.right
+            anchors.rightMargin: Tokens.padding.medium
+            anchors.verticalCenter: parent.verticalCenter
+            text: "expand_more"
+            rotation: tile.open ? 180 : 0
+            color: tile.checked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
+
+            Behavior on rotation {
+                Anim {
+                    type: Anim.FastSpatial
+                }
+            }
         }
     }
 
-    // What is playing, with the cover behind; the time and date when nothing plays.
-    component MediaCard: StyledClippingRect {
-        id: media
+    // A toggle: icon and name in a pill that squares off a little when on.
+    component Toggle: StyledRect {
+        id: toggle
 
-        readonly property var player: Players.active
+        property string icon
+        property string label
+        property bool checked
 
-        implicitHeight: 136
-        radius: Tokens.rounding.large
-        color: Colours.tPalette.m3surfaceContainerHigh
+        signal clicked
 
-        Image {
-            anchors.fill: parent
-            visible: media.player !== null && status === Image.Ready
-            source: media.player?.trackArtUrl ?? ""
-            sourceSize.width: 256
-            sourceSize.height: 256
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            opacity: 0.45
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        implicitHeight: 52
+        radius: checked ? Tokens.rounding.large : Tokens.rounding.full
+        color: checked ? Colours.palette.m3primary : Colours.tPalette.m3surfaceContainerHigh
+
+        Behavior on radius {
+            Anim {
+                type: Anim.FastSpatial
+            }
         }
 
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: Tokens.padding.medium
-            visible: media.player !== null
-            spacing: 0
+        StateLayer {
+            radius: toggle.radius
+            color: toggle.checked ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
+            onClicked: toggle.clicked()
+        }
 
-            StyledText {
-                Layout.fillWidth: true
-                elide: Text.ElideRight
-                maximumLineCount: 2
-                wrapMode: Text.WordWrap
-                text: media.player?.trackTitle || Tr.tr("Nothing playing")
-                font: Tokens.font.body.builders.medium.weight(Font.DemiBold).build()
-                color: Colours.palette.m3onSurface
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: Tokens.padding.large
+            anchors.rightMargin: Tokens.padding.medium
+            spacing: Tokens.spacing.small
+
+            MaterialIcon {
+                text: toggle.icon
+                fill: toggle.checked ? 1 : 0
+                color: toggle.checked ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                fontStyle: Tokens.font.icon.small
+
+                Behavior on fill {
+                    Anim {
+                        type: Anim.DefaultEffects
+                    }
+                }
             }
 
             StyledText {
                 Layout.fillWidth: true
                 elide: Text.ElideRight
-                text: media.player?.trackArtist ?? ""
-                font: Tokens.font.body.small
+                text: toggle.label
+                font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
+                color: toggle.checked ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
+            }
+        }
+    }
+
+    // Top of a list: its name, a refresh button and the on/off switch.
+    component ListHeader: RowLayout {
+        id: header
+
+        property string title
+        property bool checked
+        property bool busy
+        property bool showRefresh: true
+
+        signal toggled(on: bool)
+        signal refresh
+
+        Layout.fillWidth: true
+        Layout.leftMargin: Tokens.padding.small
+        Layout.bottomMargin: Tokens.spacing.extraSmall
+        spacing: Tokens.spacing.small
+
+        StyledText {
+            Layout.fillWidth: true
+            elide: Text.ElideRight
+            text: header.title
+            font: Tokens.font.body.builders.medium.weight(Font.DemiBold).build()
+            color: Colours.palette.m3onSurface
+        }
+
+        IconButton {
+            visible: header.showRefresh && header.checked
+            type: IconButton.Text
+            isRound: true
+            icon: "refresh"
+            disabled: header.busy
+            onClicked: header.refresh()
+        }
+
+        StyledSwitch {
+            checked: header.checked
+            onToggled: header.toggled(checked)
+        }
+    }
+
+    // A network or device in a list.
+    component ListRow: StyledRect {
+        id: row
+
+        property string icon
+        property string title
+        property string sub
+        property string trailing
+        property bool active
+        property bool busy
+
+        signal clicked
+
+        Layout.fillWidth: true
+        implicitHeight: 52
+        radius: Tokens.rounding.medium
+        color: active ? Colours.palette.m3secondaryContainer : "transparent"
+
+        StateLayer {
+            radius: row.radius
+            color: row.active ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurface
+            onClicked: row.clicked()
+        }
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: Tokens.padding.medium
+            anchors.rightMargin: Tokens.padding.medium
+            spacing: Tokens.spacing.medium
+
+            MaterialIcon {
+                text: row.icon
+                fill: row.active ? 1 : 0
+                color: row.active ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
+                fontStyle: Tokens.font.icon.medium
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 0
+
+                StyledText {
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                    text: row.title
+                    font: Tokens.font.body.builders.medium.weight(row.active ? Font.DemiBold : Font.Normal).build()
+                    color: row.active ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurface
+                }
+
+                StyledText {
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                    text: row.sub
+                    font: Tokens.font.body.small
+                    color: row.active ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
+                }
+            }
+
+            MaterialIcon {
+                visible: row.trailing !== "" && !row.busy
+                text: row.trailing
                 color: Colours.palette.m3onSurfaceVariant
+                fontStyle: Tokens.font.icon.small
             }
 
-            Item {
-                Layout.fillHeight: true
-            }
-
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: Tokens.spacing.extraSmall
-
-                IconButton {
-                    type: IconButton.Text
-                    isRound: true
-                    icon: "skip_previous"
-                    disabled: !(media.player?.canGoPrevious ?? false)
-                    onClicked: media.player?.previous()
-                }
-
-                IconButton {
-                    type: IconButton.Filled
-                    isRound: true
-                    icon: media.player?.isPlaying ? "pause" : "play_arrow"
-                    onClicked: media.player?.togglePlaying()
-                }
-
-                IconButton {
-                    type: IconButton.Text
-                    isRound: true
-                    icon: "skip_next"
-                    disabled: !(media.player?.canGoNext ?? false)
-                    onClicked: media.player?.next()
-                }
-            }
-        }
-
-        ColumnLayout {
-            anchors.centerIn: parent
-            visible: media.player === null
-            spacing: 0
-
-            StyledText {
-                Layout.alignment: Qt.AlignHCenter
-                text: Time.hourStr + ":" + Time.minuteStr
-                font: Tokens.font.body.builders.large.size(34).weight(Font.DemiBold).build()
+            MaterialIcon {
+                visible: row.active && !row.busy
+                text: "check_circle"
+                fill: 1
                 color: Colours.palette.m3primary
+                fontStyle: Tokens.font.icon.small
             }
 
-            StyledText {
-                Layout.alignment: Qt.AlignHCenter
-                text: {
-                    Time.hours;
-                    return new Date().toLocaleDateString(Qt.locale(), "ddd d MMM");
-                }
-                font: Tokens.font.body.small
-                color: Colours.palette.m3onSurfaceVariant
+            CircularIndicator {
+                visible: row.busy
+                running: row.busy
+                implicitWidth: 20
+                implicitHeight: 20
             }
         }
+    }
+
+    // "... settings" at the bottom of a list.
+    component SettingsLink: TextButton {
+        Layout.alignment: Qt.AlignRight
+        Layout.topMargin: Tokens.spacing.extraSmall
+        type: TextButton.Text
+        onClicked: root.closeAnd(() => WindowFactory.create())
     }
 }

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Shapes
 import Quickshell
 import Quickshell.Bluetooth
 import Caelestia
@@ -9,37 +10,41 @@ import Caelestia.Config
 import Caelestia.I18n
 import qs.components
 import qs.components.controls
+import qs.components.effects
 import qs.services
 import qs.utils
 
-// "Super devices", the way Huawei / HyperOS do it: this PC in the middle, the devices it can work
-// with orbiting it. Drag a device onto the PC to connect it, drag it away to disconnect.
+// "Super devices", the way Huawei / HyperOS do it: this PC as a glowing disc in the middle, the
+// devices it can work with floating around it. Drag a device onto the PC to connect it, drag it
+// away to disconnect.
 //   - Bluetooth devices that are paired (earbuds, speakers, controllers, ...): (dis)connect.
 //   - Tablets from KDE Connect: become a drawing tablet / second screen (Weylus); the tablet's
 //     browser opens the page by itself.
 //   - Phones from KDE Connect: their screen in a window (scrcpy); tapping one shows Find,
 //     clipboard and file sending.
-// Connected devices sit close round the PC, linked to it. Coming into reach, snapping in and
-// letting go each give a short pulse (services/Haptics.qml) - felt through a subwoofer.
-// Phones are only looked up while the panel is open (`active`).
-StyledRect {
+// Loose devices drift slowly around the PC; connected ones sit right next to it, linked to it.
+// Coming into reach, snapping in and letting go each give a short pulse (services/Haptics.qml).
+// Only animates and looks up phones while the panel is open (`active`).
+StyledClippingRect {
     id: root
 
     property bool active
     property string selected
     // Optimistic state while a connection is being made: key -> wanted (bool).
     property var pending: ({})
+    // A device is being dragged within reach of the PC.
+    property bool zoneHot
+    // Drives the drifting (0 -> 2π, over and over, only while on screen).
+    property real phase
 
     readonly property real cx: ring.width / 2
     readonly property real cy: ring.height / 2
-    readonly property real reach: 62 // drop zone round the PC
+    readonly property real reach: 64 // drop zone round the PC
     readonly property var btDevices: Bluetooth.devices.values.filter(d => d.paired || d.connected) // qmllint disable unresolved-type
     // Plain string keys keep each bubble (and its animation) when the devices' details change.
     readonly property var keys: PhoneLink.devices.map(d => "kde:" + d.id).concat(btDevices.map(d => "bt:" + d.address)).slice(0, 8)
     readonly property var linkedKeys: keys.filter(k => isLinked(k))
     readonly property var freeKeys: keys.filter(k => !isLinked(k))
-    // A device is being dragged within reach of the PC.
-    property bool zoneHot
 
     function phoneFor(key: string): var {
         return key.startsWith("kde:") ? (PhoneLink.devices.find(d => "kde:" + d.id === key) ?? null) : null;
@@ -108,14 +113,14 @@ StyledRect {
         const inner = linkedKeys.indexOf(key);
         if (inner >= 0) {
             const n = linkedKeys.length;
-            const a = (n === 1 ? -35 : -90 + 360 * inner / n) * Math.PI / 180;
-            return Qt.point(cx + Math.cos(a) * 64, cy + Math.sin(a) * 58);
+            const a = (n === 1 ? -40 : -90 + 360 * inner / n) * Math.PI / 180;
+            return Qt.point(cx + Math.cos(a) * 70, cy + Math.sin(a) * 62);
         }
         const i = freeKeys.indexOf(key);
         const n = Math.max(1, freeKeys.length);
-        const a = (n === 1 ? 180 : n === 2 ? 180 + 180 * i : 200 + 360 * i / n) * Math.PI / 180;
-        const rx = Math.min(ring.width / 2 - 38, 150);
-        return Qt.point(cx + Math.cos(a) * rx, cy + Math.sin(a) * (ring.height / 2 - 34));
+        const a = (n === 1 ? 180 : n === 2 ? 160 + 220 * i : 200 + 360 * i / n) * Math.PI / 180;
+        const rx = Math.min(ring.width / 2 - 52, 158);
+        return Qt.point(cx + Math.cos(a) * rx, cy + Math.sin(a) * (ring.height / 2 - 52));
     }
 
     function connect(key: string): void {
@@ -165,6 +170,7 @@ StyledRect {
     color: Colours.tPalette.m3surfaceContainer
 
     onActiveChanged: active ? PhoneLink.addUser() : PhoneLink.removeUser()
+    onKeysChanged: settle()
     Component.onCompleted: {
         if (active)
             PhoneLink.addUser();
@@ -174,8 +180,13 @@ StyledRect {
             PhoneLink.removeUser();
     }
 
-    // Pending states settle once the real state agrees, or give up after a while.
-    onKeysChanged: settle()
+    NumberAnimation on phase {
+        running: root.active && root.visible
+        from: 0
+        to: Math.PI * 2
+        duration: 9000
+        loops: Animation.Infinite
+    }
 
     Connections {
         function onExtendedToChanged(): void {
@@ -204,12 +215,62 @@ StyledRect {
         onTriggered: root.settle()
     }
 
+    // Soft glow behind everything, centred on the PC (HyperOS style), in the wallpaper's colours.
+    Shape {
+        anchors.fill: parent
+        preferredRendererType: Shape.CurveRenderer
+
+        ShapePath {
+            strokeWidth: -1
+            fillGradient: RadialGradient {
+                centerX: ring.x + root.cx
+                centerY: ring.y + root.cy
+                centerRadius: Math.max(root.width, root.height) * 0.75
+                focalX: centerX
+                focalY: centerY
+
+                GradientStop {
+                    position: 0
+                    color: Qt.alpha(Colours.palette.m3primary, root.zoneHot ? 0.3 : 0.2)
+                }
+                GradientStop {
+                    position: 0.45
+                    color: Qt.alpha(Colours.palette.m3tertiary, 0.08)
+                }
+                GradientStop {
+                    position: 1
+                    color: "transparent"
+                }
+            }
+
+            startX: 0
+            startY: 0
+
+            PathLine {
+                x: root.width
+                y: 0
+            }
+            PathLine {
+                x: root.width
+                y: root.height
+            }
+            PathLine {
+                x: 0
+                y: root.height
+            }
+            PathLine {
+                x: 0
+                y: 0
+            }
+        }
+    }
+
     ColumnLayout {
         id: layout
 
         anchors.fill: parent
         anchors.margins: Tokens.padding.large
-        spacing: Tokens.spacing.small
+        spacing: Tokens.spacing.extraSmall
 
         RowLayout {
             Layout.fillWidth: true
@@ -217,34 +278,68 @@ StyledRect {
 
             StyledText {
                 Layout.fillWidth: true
+                elide: Text.ElideRight
                 text: Tr.tr("Super devices")
-                font: Tokens.font.body.builders.medium.weight(Font.DemiBold).build()
+                font: Tokens.font.title.small
                 color: Colours.palette.m3onSurface
             }
 
-            StyledText {
-                text: root.linkedKeys.length > 0 ? Tr.trN("%n connected", "%n connected", root.linkedKeys.length) : root.keys.length > 0 ? Tr.tr("Drag onto your PC to connect") : ""
-                font: Tokens.font.body.small
-                color: root.linkedKeys.length > 0 ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+            StyledRect {
+                visible: root.linkedKeys.length > 0
+                implicitWidth: countText.implicitWidth + Tokens.padding.medium * 2
+                implicitHeight: countText.implicitHeight + Tokens.padding.extraSmall * 2
+                radius: Tokens.rounding.full
+                color: Colours.palette.m3primaryContainer
+
+                StyledText {
+                    id: countText
+
+                    anchors.centerIn: parent
+                    text: Tr.trN("%n connected", "%n connected", root.linkedKeys.length)
+                    font: Tokens.font.label.medium
+                    color: Colours.palette.m3onPrimaryContainer
+                }
             }
+        }
+
+        StyledText {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: {
+                if (root.keys.length === 0)
+                    return PhoneLink.available ? Tr.tr("Pair a Bluetooth device or your phone in KDE Connect to see it here.") : Tr.tr("Pair a Bluetooth device to see it here. Install KDE Connect to add your phone and tablet.");
+                return Tr.tr("Drag a device onto your PC to connect, away to disconnect.");
+            }
+            font: Tokens.font.body.small
+            color: Colours.palette.m3onSurfaceVariant
         }
 
         Item {
             id: ring
 
             Layout.fillWidth: true
-            implicitHeight: 200
+            Layout.topMargin: Tokens.spacing.small
+            implicitHeight: 236
 
-            // Orbits
+            // Lighter discs round the PC; the inner one is the drop zone.
             StyledRect {
                 x: root.cx - width / 2
                 y: root.cy - height / 2
-                width: root.reach * 2 + 8
+                width: root.reach * 3.4
                 height: width
                 radius: width / 2
-                color: Qt.alpha(Colours.palette.m3primary, root.zoneHot ? 0.14 : 0)
-                border.width: 1
-                border.color: Qt.alpha(root.zoneHot ? Colours.palette.m3primary : Colours.palette.m3outlineVariant, root.zoneHot ? 0.9 : 0.6)
+                color: Qt.alpha(Colours.palette.m3onSurface, 0.025)
+            }
+
+            StyledRect {
+                x: root.cx - width / 2
+                y: root.cy - height / 2
+                width: root.reach * 2
+                height: width
+                radius: width / 2
+                color: Qt.alpha(root.zoneHot ? Colours.palette.m3primary : Colours.palette.m3onSurface, root.zoneHot ? 0.16 : 0.045)
+                border.width: root.zoneHot ? 2 : 0
+                border.color: Qt.alpha(Colours.palette.m3primary, 0.7)
                 scale: root.zoneHot ? 1.08 : 1
 
                 Behavior on scale {
@@ -258,17 +353,6 @@ StyledRect {
                 }
             }
 
-            StyledRect {
-                x: root.cx - width / 2
-                y: root.cy - height / 2
-                width: Math.min(ring.width - 24, 300)
-                height: ring.height - 52
-                radius: height / 2
-                color: "transparent"
-                border.width: 1
-                border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.35)
-            }
-
             // Links from this PC to connected devices (under the bubbles).
             Repeater {
                 model: ScriptModel {
@@ -279,22 +363,12 @@ StyledRect {
             }
 
             // This PC
-            StyledRect {
-                id: pc
-
+            Item {
                 x: root.cx - width / 2
                 y: root.cy - height / 2
-                implicitWidth: 60
-                implicitHeight: 60
-                radius: root.zoneHot ? Tokens.rounding.large : Tokens.rounding.full
-                color: root.zoneHot ? Colours.palette.m3primary : Colours.palette.m3primaryContainer
+                width: 72
+                height: 72
                 scale: root.zoneHot ? 1.1 : 1
-
-                Behavior on radius {
-                    Anim {
-                        type: Anim.FastSpatial
-                    }
-                }
 
                 Behavior on scale {
                     Anim {
@@ -302,12 +376,39 @@ StyledRect {
                     }
                 }
 
-                MaterialIcon {
-                    anchors.centerIn: parent
-                    text: "computer"
-                    fill: 1
-                    color: root.zoneHot ? Colours.palette.m3onPrimary : Colours.palette.m3onPrimaryContainer
-                    fontStyle: Tokens.font.icon.large
+                Elevation {
+                    anchors.fill: parent
+                    radius: width / 2
+                    level: 3
+                }
+
+                StyledClippingRect {
+                    anchors.fill: parent
+                    radius: width / 2
+                    color: Colours.palette.m3primary
+
+                    // A soft highlight on top, like a lit sphere.
+                    Rectangle {
+                        anchors.fill: parent
+                        gradient: Gradient {
+                            GradientStop {
+                                position: 0
+                                color: Qt.rgba(1, 1, 1, 0.28)
+                            }
+                            GradientStop {
+                                position: 0.55
+                                color: Qt.rgba(1, 1, 1, 0)
+                            }
+                        }
+                    }
+
+                    MaterialIcon {
+                        anchors.centerIn: parent
+                        text: "computer"
+                        fill: 1
+                        color: Colours.palette.m3onPrimary
+                        fontStyle: Tokens.font.icon.large
+                    }
                 }
             }
 
@@ -317,18 +418,6 @@ StyledRect {
                 }
 
                 Bubble {}
-            }
-
-            StyledText {
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.bottom: parent.bottom
-                width: parent.width - Tokens.padding.large * 2
-                visible: root.keys.length === 0
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.WordWrap
-                text: PhoneLink.available ? Tr.tr("Pair a Bluetooth device or your phone in KDE Connect to see it here") : Tr.tr("Pair a Bluetooth device to see it here. Install KDE Connect to add your phone.")
-                font: Tokens.font.body.small
-                color: Colours.palette.m3onSurfaceVariant
             }
         }
 
@@ -359,6 +448,7 @@ StyledRect {
 
             IconTextButton {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 1
                 type: IconTextButton.Tonal
                 icon: "ring_volume"
                 text: Tr.tr("Find")
@@ -368,15 +458,17 @@ StyledRect {
 
             IconTextButton {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 1
                 type: IconTextButton.Tonal
                 icon: "content_paste_go"
-                text: Tr.tr("Clipboard")
+                text: Tr.tr("Paste")
                 disabled: !(actions.phone?.reachable ?? false)
                 onClicked: PhoneLink.sendClipboard(actions.phone.id)
             }
 
             IconTextButton {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 1
                 type: IconTextButton.Tonal
                 icon: "upload_file"
                 text: Tr.tr("File")
@@ -403,23 +495,11 @@ StyledRect {
         transformOrigin: Item.Left
         rotation: Math.atan2(dy, dx) * 180 / Math.PI
         color: Colours.palette.m3primary
-        opacity: on ? 0.55 : 0
+        opacity: on ? 0.5 : 0
 
         Behavior on opacity {
             Anim {
                 type: Anim.DefaultEffects
-            }
-        }
-
-        Behavior on width {
-            Anim {
-                type: Anim.DefaultSpatial
-            }
-        }
-
-        Behavior on rotation {
-            Anim {
-                type: Anim.DefaultSpatial
             }
         }
     }
@@ -437,13 +517,18 @@ StyledRect {
         // Centre of the bubble's circle while it is dragged.
         readonly property point held: Qt.point(rest.x + drag.translation.x, rest.y + drag.translation.y)
         readonly property bool inReach: dragging && Math.hypot(held.x - root.cx, held.y - root.cy) < root.reach
+        // Drifting: each bubble on its own slow loop round its spot (less when connected).
+        readonly property real seed: index * 1.9 + 0.7
+        readonly property real drift: dragging ? 0 : linked ? 1.5 : 5
+        readonly property real driftX: Math.sin(root.phase + seed) * drift
+        readonly property real driftY: Math.cos(root.phase * 2 + seed) * drift * 0.8
         property real reveal
 
-        x: (dragging ? held.x : root.cx + (rest.x - root.cx) * reveal) - width / 2
-        y: (dragging ? held.y : root.cy + (rest.y - root.cy) * reveal) - dot.height / 2 - dot.y
+        x: (dragging ? held.x : root.cx + (settleAnchor.at.x - root.cx) * reveal + driftX) - width / 2
+        y: (dragging ? held.y : root.cy + (settleAnchor.at.y - root.cy) * reveal + driftY) - dot.height / 2 - dot.y
         z: dragging ? 10 : 1
-        width: 76
-        height: 70
+        width: 92
+        height: 88
         opacity: (info?.reachable ?? false) ? reveal : reveal * 0.45
         scale: dragging ? 1.12 : (0.6 + 0.4 * reveal)
 
@@ -454,22 +539,6 @@ StyledRect {
         }
 
         Component.onCompleted: revealAnim.start()
-
-        Behavior on x {
-            enabled: !bubble.dragging && bubble.reveal >= 1
-
-            Anim {
-                type: Anim.DefaultSpatial
-            }
-        }
-
-        Behavior on y {
-            enabled: !bubble.dragging && bubble.reveal >= 1
-
-            Anim {
-                type: Anim.DefaultSpatial
-            }
-        }
 
         Behavior on scale {
             Anim {
@@ -504,6 +573,31 @@ StyledRect {
             }
         }
 
+        // Where the bubble is heading: glides between the outer orbit and the PC, and back from
+        // wherever it was let go (the drift on top is not animated).
+        Item {
+            id: settleAnchor
+
+            property point at: bubble.rest
+            property bool instant
+
+            function from(p: point): void {
+                instant = true;
+                at = p;
+                instant = false;
+                at = Qt.binding(() => bubble.rest);
+            }
+
+            Behavior on at {
+                enabled: !settleAnchor.instant
+
+                PropertyAnimation {
+                    duration: Tokens.anim.durations.expressiveDefaultSpatial
+                    easing: Tokens.anim.expressiveDefaultSpatial
+                }
+            }
+        }
+
         DragHandler {
             id: drag
 
@@ -514,6 +608,7 @@ StyledRect {
                     return;
                 const near = Math.hypot(bubble.held.x - root.cx, bubble.held.y - root.cy) < root.reach;
                 root.zoneHot = false;
+                settleAnchor.from(bubble.held);
                 if (near && !bubble.linked)
                     root.connect(bubble.modelData);
                 else if (!near && bubble.linked && Math.hypot(drag.translation.x, drag.translation.y) > 30)
@@ -525,8 +620,8 @@ StyledRect {
         CircularProgress {
             anchors.horizontalCenter: parent.horizontalCenter
             y: 0
-            width: 50
-            height: 50
+            width: 58
+            height: 58
             visible: (bubble.info?.battery ?? -1) >= 0
             value: Math.max(0, bubble.info?.battery ?? 0)
             hasEndIndicator: false
@@ -535,21 +630,21 @@ StyledRect {
             bgColour: Qt.alpha(Colours.palette.m3onSurface, 0.08)
         }
 
+        Elevation {
+            anchors.fill: dot
+            radius: dot.radius
+            level: bubble.dragging ? 3 : 1
+        }
+
         StyledRect {
             id: dot
 
             anchors.horizontalCenter: parent.horizontalCenter
             y: 5
-            width: 40
-            height: 40
-            radius: bubble.linked ? Tokens.rounding.medium : Tokens.rounding.full
-            color: bubble.inReach ? Colours.palette.m3primary : bubble.chosen ? Colours.palette.m3tertiaryContainer : bubble.linked ? Colours.palette.m3secondaryContainer : Colours.tPalette.m3surfaceContainerHighest
-
-            Behavior on radius {
-                Anim {
-                    type: Anim.FastSpatial
-                }
-            }
+            width: 48
+            height: 48
+            radius: Tokens.rounding.full
+            color: bubble.inReach ? Colours.palette.m3primary : bubble.chosen ? Colours.palette.m3tertiaryContainer : bubble.linked ? Colours.palette.m3secondaryContainer : Colours.palette.m3surfaceContainerHighest
 
             StateLayer {
                 radius: dot.radius
@@ -589,11 +684,14 @@ StyledRect {
 
         StyledText {
             anchors.top: dot.bottom
-            anchors.topMargin: 5
+            anchors.topMargin: 6
             anchors.horizontalCenter: parent.horizontalCenter
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            maximumLineCount: 2
             elide: Text.ElideRight
+            lineHeight: 0.9
             visible: !bubble.dragging
             text: bubble.info?.name ?? ""
             font: Tokens.font.label.small
