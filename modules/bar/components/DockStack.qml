@@ -10,7 +10,7 @@ import qs.services
 Item {
     id: root
 
-    readonly property var top: FileDock.items[0] ?? null
+    readonly property var newest: FileDock.items[0] ?? null
     readonly property var second: FileDock.items[1] ?? null
     readonly property bool showing: FileDock.items.length > 0 || FileDock.dropHover
     // 0 hidden, 1 shown; the bar's spacing around it follows (Bar.qml).
@@ -64,9 +64,9 @@ Item {
         width: 26
         height: 26
         radius: Tokens.rounding.small
-        opacity: root.top && !FileDock.dropHover ? 1 : 0
-        path: root.top?.path ?? ""
-        visible: root.top !== null
+        opacity: root.newest && !FileDock.dropHover ? 1 : 0
+        path: root.newest?.path ?? ""
+        visible: root.newest !== null
         scale: dragging ? 0.85 : 1
 
         Behavior on opacity {
