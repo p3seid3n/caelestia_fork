@@ -89,7 +89,15 @@ Singleton {
         if (!hasScrcpy)
             return;
         mirroring = id;
-        mirrorProc.command = ["scrcpy", "--window-title", name || "Phone", "--stay-awake", "--turn-screen-off"];
+        // Wireless debugging often lists one phone twice (ip:port and an mDNS name), which scrcpy
+        // refuses; pick one entry (the ip:port one when there is one) and say so if it still fails.
+        mirrorProc.command = ["sh", "-c", `
+            list=$(adb devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1}')
+            serial=$(printf '%s\\n' "$list" | grep -E '^[0-9.]+:[0-9]+$' | head -n1)
+            [ -n "$serial" ] || serial=$(printf '%s\\n' "$list" | head -n1)
+            [ -n "$serial" ] || { echo "No device found by adb" >&2; exit 1; }
+            exec scrcpy -s "$serial" --window-title "$1" --stay-awake --turn-screen-off
+        `, "sh", name || "Phone"];
         mirrorProc.running = true;
     }
 
@@ -137,9 +145,16 @@ Singleton {
     Process {
         id: mirrorProc
 
+        stderr: StdioCollector {
+            id: mirrorErr
+        }
+
         onExited: code => {
-            if (root.mirroring !== "" && code !== 0 && code !== 15)
-                Toaster.toast(Tr.tr("Phone screen"), Tr.tr("Couldn't reach the phone over adb. Turn on USB debugging (or run adb pair once), then try again."), "mobile_off");
+            if (root.mirroring !== "" && code !== 0 && code !== 15) {
+                // scrcpy's own last error line says what is wrong.
+                const lines = mirrorErr.text.split("\n").map(l => l.replace(/^ERROR:\s*/, "").trim()).filter(l => l && !l.startsWith("-->"));
+                Toaster.toast(Tr.tr("Phone screen"), lines.length > 0 ? lines[lines.length - 1] : Tr.tr("Couldn't reach the phone over adb. Turn on wireless debugging and pair it once, then try again."), "mobile_off");
+            }
             root.mirroring = "";
         }
     }
