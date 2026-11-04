@@ -85,15 +85,6 @@ Item {
             }
         }
 
-        StyledText {
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-            Layout.bottomMargin: Tokens.spacing.extraSmall
-            text: root.hovering ? Tr.tr("Drop to add") : Tr.tr("Drag into any app · drop files here · screenshots land here by themselves")
-            font: Tokens.font.body.small
-            color: Colours.palette.m3onSurfaceVariant
-        }
-
         // Empty
         StyledRect {
             Layout.fillWidth: true
@@ -117,7 +108,7 @@ Item {
 
                 StyledText {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: Tr.tr("Drop files or take a screenshot")
+                    text: root.hovering ? Tr.tr("Drop to add") : Tr.tr("Empty")
                     font: Tokens.font.body.small
                     color: Colours.palette.m3onSurfaceVariant
                 }

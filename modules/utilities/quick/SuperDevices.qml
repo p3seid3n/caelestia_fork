@@ -156,6 +156,7 @@ StyledClippingRect {
             setPending(key, false);
             bt.connected = false;
         } else if (p) {
+            setPending(key, false);
             if (PhoneLink.extendedTo === p.id)
                 PhoneLink.stopExtend();
             if (PhoneLink.mirroring === p.id)
@@ -304,12 +305,9 @@ StyledClippingRect {
 
         StyledText {
             Layout.fillWidth: true
+            visible: root.keys.length === 0
             wrapMode: Text.WordWrap
-            text: {
-                if (root.keys.length === 0)
-                    return PhoneLink.available ? Tr.tr("Pair a Bluetooth device or your phone in KDE Connect to see it here.") : Tr.tr("Pair a Bluetooth device to see it here. Install KDE Connect to add your phone and tablet.");
-                return Tr.tr("Drag a device onto your PC to connect, away to disconnect.");
-            }
+            text: Tr.tr("No paired devices")
             font: Tokens.font.body.small
             color: Colours.palette.m3onSurfaceVariant
         }
@@ -426,6 +424,8 @@ StyledClippingRect {
             id: actions
 
             readonly property var phone: root.phoneFor(root.selected)
+            readonly property bool linked: root.selected !== "" && root.isLinked(root.selected)
+            readonly property bool tablet: phone?.type === "tablet"
 
             Layout.fillWidth: true
             Layout.preferredHeight: phone ? implicitHeight : 0
@@ -446,32 +446,33 @@ StyledClippingRect {
                 }
             }
 
+            // Connect / disconnect without dragging.
             IconTextButton {
                 Layout.fillWidth: true
-                Layout.preferredWidth: 1
-                type: IconTextButton.Tonal
+                type: actions.linked ? IconTextButton.Tonal : IconTextButton.Filled
+                icon: actions.linked ? "link_off" : actions.tablet ? "draw" : "cast"
+                text: actions.linked ? Tr.tr("Disconnect") : actions.tablet ? Tr.tr("Drawing tablet") : Tr.tr("Mirror screen")
+                disabled: !(actions.phone?.reachable ?? false) && !actions.linked
+                onClicked: actions.linked ? root.disconnect(root.selected) : root.connect(root.selected)
+            }
+
+            IconButton {
+                type: IconButton.Tonal
                 icon: "ring_volume"
-                text: Tr.tr("Find")
                 disabled: !(actions.phone?.reachable ?? false)
                 onClicked: PhoneLink.ring(actions.phone.id)
             }
 
-            IconTextButton {
-                Layout.fillWidth: true
-                Layout.preferredWidth: 1
-                type: IconTextButton.Tonal
+            IconButton {
+                type: IconButton.Tonal
                 icon: "content_paste_go"
-                text: Tr.tr("Paste")
                 disabled: !(actions.phone?.reachable ?? false)
                 onClicked: PhoneLink.sendClipboard(actions.phone.id)
             }
 
-            IconTextButton {
-                Layout.fillWidth: true
-                Layout.preferredWidth: 1
-                type: IconTextButton.Tonal
+            IconButton {
+                type: IconButton.Tonal
                 icon: "upload_file"
-                text: Tr.tr("File")
                 disabled: !(actions.phone?.reachable ?? false)
                 onClicked: PhoneLink.requestShare(actions.phone.id)
             }
@@ -517,6 +518,10 @@ StyledClippingRect {
         // Centre of the bubble's circle while it is dragged.
         readonly property point held: Qt.point(rest.x + drag.translation.x, rest.y + drag.translation.y)
         readonly property bool inReach: dragging && Math.hypot(held.x - root.cx, held.y - root.cy) < root.reach
+        // A connected device pulled far enough away to disconnect on release.
+        readonly property bool pulledOut: dragging && linked && Math.hypot(held.x - root.cx, held.y - root.cy) > root.reach + 26
+        // Last position during the drag (Qt resets the translation before onActiveChanged runs).
+        property point lastHeld
         // Drifting: each bubble on its own slow loop round its spot (less when connected).
         readonly property real seed: index * 1.9 + 0.7
         readonly property real drift: dragging ? 0 : linked ? 1.5 : 5
@@ -535,6 +540,10 @@ StyledClippingRect {
         onInReachChanged: {
             root.zoneHot = inReach && !linked;
             if (inReach && !linked)
+                Haptics.tick();
+        }
+        onPulledOutChanged: {
+            if (pulledOut)
                 Haptics.tick();
         }
 
@@ -602,16 +611,24 @@ StyledClippingRect {
             id: drag
 
             target: null
-            enabled: bubble.info?.reachable ?? false
-            onActiveChanged: {
+            // A connected device can always be pulled off, even if it went out of reach meanwhile.
+            enabled: (bubble.info?.reachable ?? false) || bubble.linked
+            onTranslationChanged: {
                 if (active)
+                    bubble.lastHeld = Qt.point(bubble.rest.x + translation.x, bubble.rest.y + translation.y);
+            }
+            onActiveChanged: {
+                if (active) {
+                    bubble.lastHeld = bubble.rest;
                     return;
-                const near = Math.hypot(bubble.held.x - root.cx, bubble.held.y - root.cy) < root.reach;
+                }
+                const at = bubble.lastHeld;
+                const dist = Math.hypot(at.x - root.cx, at.y - root.cy);
                 root.zoneHot = false;
-                settleAnchor.from(bubble.held);
-                if (near && !bubble.linked)
+                settleAnchor.from(at);
+                if (!bubble.linked && dist < root.reach)
                     root.connect(bubble.modelData);
-                else if (!near && bubble.linked && Math.hypot(drag.translation.x, drag.translation.y) > 30)
+                else if (bubble.linked && dist > root.reach + 26)
                     root.disconnect(bubble.modelData);
             }
         }
@@ -644,7 +661,7 @@ StyledClippingRect {
             width: 48
             height: 48
             radius: Tokens.rounding.full
-            color: bubble.inReach ? Colours.palette.m3primary : bubble.chosen ? Colours.palette.m3tertiaryContainer : bubble.linked ? Colours.palette.m3secondaryContainer : Colours.palette.m3surfaceContainerHighest
+            color: bubble.pulledOut ? Colours.palette.m3errorContainer : bubble.inReach ? Colours.palette.m3primary : bubble.chosen ? Colours.palette.m3tertiaryContainer : bubble.linked ? Colours.palette.m3secondaryContainer : Colours.palette.m3surfaceContainerHighest
 
             StateLayer {
                 radius: dot.radius
@@ -659,9 +676,9 @@ StyledClippingRect {
 
             MaterialIcon {
                 anchors.centerIn: parent
-                text: bubble.info?.icon ?? "devices"
+                text: bubble.pulledOut ? "link_off" : bubble.info?.icon ?? "devices"
                 fill: bubble.linked || bubble.inReach ? 1 : 0
-                color: bubble.inReach ? Colours.palette.m3onPrimary : bubble.linked ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
+                color: bubble.pulledOut ? Colours.palette.m3onErrorContainer : bubble.inReach ? Colours.palette.m3onPrimary : bubble.linked ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
                 fontStyle: Tokens.font.icon.medium
 
                 // Pulses while (dis)connecting.
