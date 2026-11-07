@@ -83,6 +83,10 @@ Item {
     // The tab that was on screen, so it stays selected when tabs are added, removed or moved.
     property string currentId
     property bool remapping
+    // Size of the last pane that was built: a tab that is still loading takes it, so the
+    // dashboard doesn't shrink to nothing and grow back while it loads.
+    property real lastPaneW: 600
+    property real lastPaneH: 400
 
     // While customising, the sheet sets the height; the width never shrinks below the current tab's.
     readonly property real nonAnimWidth: (customizing ? Math.max(view.implicitWidth, sheet.implicitWidth) : view.implicitWidth) + viewWrapper.anchors.margins * 2
@@ -249,8 +253,8 @@ Item {
                         readonly property var def: root.tabDefs[modelData]
                         // Position in the tab bar; -1 while the tab is hidden.
                         readonly property int slot: root.tabIds.indexOf(modelData)
-                        // Whether the pane is on screen (or being swiped in).
-                        readonly property bool inView: {
+                        // Whether any of the pane is inside the visible area right now.
+                        readonly property bool onScreen: {
                             if (slot < 0)
                                 return false;
                             if (slot === view.currentIndex)
@@ -259,18 +263,42 @@ Item {
                             const vex = Math.floor(vx + view.visibleArea.widthRatio * view.contentWidth);
                             return (vx >= x && vx <= x + implicitWidth) || (vex >= x && vex <= x + implicitWidth);
                         }
+                        // Whether the pane should be built: the selected tab, or one being swiped
+                        // in by hand. Tabs the slide only passes over (Home -> Performance passes
+                        // Media) are not built: that used to build and drop the media tab, with its
+                        // audio visualiser, on the way, which stalled the slide and glitched audio.
+                        readonly property bool inView: slot >= 0 && (slot === view.currentIndex || (onScreen && (view.dragging || view.flicking)))
                         // KairosOS: a tab built once stays built (switching back is instant); off
                         // screen it is fully transparent, which the renderer skips.
                         property bool built
+                        // Size from the last time it was built, kept while it loads again.
+                        property real lastW: root.lastPaneW
+                        property real lastH: root.lastPaneH
 
                         x: slot >= 0 ? root.paneX(slot) : 0
                         visible: slot >= 0
+                        implicitWidth: item ? item.implicitWidth : lastW
+                        implicitHeight: item ? item.implicitHeight : lastH
                         sourceComponent: def?.component ?? null
+                        // Built in the background, so the tab bar and the slide never wait for it.
+                        asynchronous: true
                         // Nothing is built before the binding below decides (a Loader starts
                         // active, which used to build every tab once at start).
                         active: false
 
-                        opacity: inView ? 1 : 0
+                        opacity: onScreen ? 1 : 0
+                        onImplicitWidthChanged: {
+                            if (item && implicitWidth > 0) {
+                                lastW = implicitWidth;
+                                root.lastPaneW = implicitWidth;
+                            }
+                        }
+                        onImplicitHeightChanged: {
+                            if (item && implicitHeight > 0) {
+                                lastH = implicitHeight;
+                                root.lastPaneH = implicitHeight;
+                            }
+                        }
                         onLoaded: built = true
                         // Light tabs stay; tabs that keep working in the background (media
                         // visualiser, performance graphs) go when the dashboard closes, as before.

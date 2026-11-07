@@ -24,6 +24,7 @@ Item {
     property real sourceVolume
     property bool sourceMuted
     property real brightness
+    property double sinkSwitchedAt
 
     function show(): void {
         screenState.osd = true;
@@ -48,25 +49,40 @@ Item {
         Anim {}
     }
 
+    // Only real changes open the OSD. PipeWire re-announces a device's volume when its stream
+    // setup changes (an app or the visualiser starting to capture, the GPU's HDMI audio waking up),
+    // which used to pop the volume slider open without anything having changed.
     Connections {
         function onMutedChanged(): void {
-            root.show();
+            if (Audio.muted !== root.muted && Date.now() - root.sinkSwitchedAt > 1500)
+                root.show();
             root.muted = Audio.muted;
         }
 
         function onVolumeChanged(): void {
-            root.show();
+            if (Math.abs(Audio.volume - root.volume) > 0.005 && Date.now() - root.sinkSwitchedAt > 1500)
+                root.show();
             root.volume = Audio.volume;
         }
 
         function onSourceMutedChanged(): void {
-            root.show();
+            if (Audio.sourceMuted !== root.sourceMuted)
+                root.show();
             root.sourceMuted = Audio.sourceMuted;
         }
 
         function onSourceVolumeChanged(): void {
-            root.show();
+            if (Math.abs(Audio.sourceVolume - root.sourceVolume) > 0.005)
+                root.show();
             root.sourceVolume = Audio.sourceVolume;
+        }
+
+        function onSinkChanged(): void {
+            // Another output (or the same one coming back after a hiccup): take its values
+            // without showing them.
+            root.sinkSwitchedAt = Date.now();
+            root.volume = Audio.volume;
+            root.muted = Audio.muted;
         }
 
         target: Audio

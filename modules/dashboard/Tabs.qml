@@ -63,15 +63,40 @@ Item {
     Item {
         id: indicator
 
+        // The animated value is the tab index, not a position: the tabs move while the dashboard
+        // resizes to the next tab, and an animation towards a moving x kept restarting and trailed
+        // behind (most visible on the wide tabs on the right). Position and width are read live.
+        property real pos: root.screenState.dashboardTab
+        readonly property Item fromTab: {
+            repeater.count;
+            root.tabs;
+            return repeater.itemAt(Math.max(0, Math.floor(pos)));
+        }
+        readonly property Item toTab: {
+            repeater.count;
+            root.tabs;
+            return repeater.itemAt(Math.min(repeater.count - 1, Math.ceil(pos)));
+        }
+        readonly property real frac: pos - Math.floor(pos)
+
+        function leftOf(tab: Item): real {
+            return tab ? bar.x + tab.x + (tab.width - tab.contentWidth) / 2 : 0;
+        }
+
+        implicitWidth: {
+            const a = fromTab?.contentWidth ?? 0;
+            const b = toTab?.contentWidth ?? a;
+            return a + (b - a) * frac;
+        }
         anchors.top: bar.bottom
         anchors.topMargin: 5
 
-        implicitWidth: bar.currentItem?.contentWidth ?? 0
         implicitHeight: 3
 
         x: {
-            const tab = bar.currentItem;
-            return tab ? bar.x + tab.x + (tab.width - tab.contentWidth) / 2 : 0;
+            const a = leftOf(fromTab);
+            const b = toTab ? leftOf(toTab) : a;
+            return a + (b - a) * frac;
         }
 
         clip: true
@@ -86,11 +111,7 @@ Item {
             radius: Tokens.rounding.full
         }
 
-        Behavior on x {
-            Anim {}
-        }
-
-        Behavior on implicitWidth {
+        Behavior on pos {
             Anim {}
         }
     }

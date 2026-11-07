@@ -29,6 +29,12 @@ Singleton {
     property list<var> entities: []
     // entity_id -> entity, rebuilt on every refresh.
     property var byId: ({})
+    // Optimistic values the UI shows until Home Assistant reports them (or a few seconds pass).
+    // Lights fade to a new brightness, so a refresh right after a slider move still reports the old
+    // level; without holding the new one the slider jumped back while the light got brighter.
+    property var holds: ({})
+    // For sliders: only the latest value is sent, at most every 250 ms.
+    property var pendingCall: null
     // Tiles the user placed, in display order: [{ id, w, h }].
     // w: 1-8 grid columns, h: 1-3 grid rows. The grid packs them densely.
     readonly property int columns: 8
@@ -280,26 +286,47 @@ Singleton {
 
     // Generic service call with an optional optimistic state/attribute patch.
     function call(domain: string, service: string, data: var, patch: var): void {
-        if (patch && byId[data.entity_id]) {
-            const copy = Object.assign({}, byId[data.entity_id]);
-            if (patch.state !== undefined)
-                copy.state = patch.state;
-            copy.attributes = Object.assign({}, copy.attributes, patch.attributes ?? {});
-            const map = Object.assign({}, byId);
-            map[data.entity_id] = copy;
-            byId = map;
-        }
+        applyPatch(data.entity_id, patch);
         request("POST", url, token, `/api/services/${domain}/${service}`, data, () => refreshSoon.restart());
     }
 
-    // For sliders: only the latest value is sent, at most every 250 ms.
-    property var pendingCall: null
+    function applyPatch(id: string, patch: var): void {
+        if (!patch || !byId[id])
+            return;
+        const copy = Object.assign({}, byId[id]);
+        if (patch.state !== undefined)
+            copy.state = patch.state;
+        copy.attributes = Object.assign({}, copy.attributes, patch.attributes ?? {});
+        const map = Object.assign({}, byId);
+        map[id] = copy;
+        byId = map;
+        const h = Object.assign({}, holds);
+        h[id] = {
+            patch,
+            until: Date.now() + 4000
+        };
+        holds = h;
+    }
+
+    // Whether a fetched entity already shows the held values (numbers within a small margin).
+    function matches(e: var, patch: var): bool {
+        if (patch.state !== undefined && e.state !== patch.state)
+            return false;
+        for (const [k, v] of Object.entries(patch.attributes ?? {})) {
+            const got = e.attributes?.[k];
+            if (typeof v === "number" ? !(typeof got === "number" && Math.abs(got - v) <= Math.max(2, Math.abs(v) * 0.02)) : JSON.stringify(got) !== JSON.stringify(v))
+                return false;
+        }
+        return true;
+    }
 
     function callThrottled(domain: string, service: string, data: var, patch: var): void {
         if (!throttle.running) {
             call(domain, service, data, patch);
             throttle.start();
         } else {
+            // Show it now; it is sent when the throttle runs out.
+            applyPatch(data.entity_id, patch);
             pendingCall = {
                 domain,
                 service,
@@ -404,8 +431,23 @@ Singleton {
                 });
                 list.sort((a, b) => a.attributes.friendly_name.localeCompare(b.attributes.friendly_name));
                 const map = {};
-                for (const e of list)
+                const now = Date.now();
+                const keep = {};
+                for (const e of list) {
+                    const hold = root.holds[e.entity_id];
+                    if (hold && hold.until > now && !root.matches(e, hold.patch)) {
+                        // Still on its way: keep showing the value that was asked for.
+                        keep[e.entity_id] = hold;
+                        if (hold.patch.state !== undefined)
+                            e.state = hold.patch.state;
+                        e.attributes = Object.assign({}, e.attributes, hold.patch.attributes ?? {});
+                    }
                     map[e.entity_id] = e;
+                }
+                root.holds = keep;
+                // Check again once the light has faded to where it was asked to go.
+                if (Object.keys(keep).length > 0)
+                    holdCheck.restart();
                 entities = list;
                 byId = map;
                 // Tiles from before the shapes existed were all 2×1: shape them once.
@@ -473,6 +515,13 @@ Singleton {
         id: refreshSoon
 
         interval: 400
+        onTriggered: root.refresh()
+    }
+
+    Timer {
+        id: holdCheck
+
+        interval: 1500
         onTriggered: root.refresh()
     }
 
