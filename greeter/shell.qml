@@ -205,7 +205,9 @@ ShellRoot {
         if (preview)
             Qt.quit();
         else
-            Greetd.launch(command, ["KAIROS_FROM_GREETER=1"], true);
+            // Hyprland's startup output goes to the journal (journalctl -t hyprland) instead
+            // of flashing on the screen between the greeter and the desktop.
+            Greetd.launch(["systemd-cat", "-t", "hyprland", "--"].concat(command), ["KAIROS_FROM_GREETER=1"], true);
     }
 
     // Inside cage (KAIROS_GREETER_KIOSK=1) there is no layer shell: use one plain window,
