@@ -75,8 +75,18 @@ ShellRoot {
     function startSession(): void {
         waitingForPrompt = true;
         submitPending = false;
-        if (!preview && user)
-            Greetd.createSession(user);
+        if (preview)
+            return;
+        if (!user) {
+            console.warn("kairos-greeter: no user set in /etc/kairos/greeter.json");
+            message = "No user set in /etc/kairos/greeter.json";
+            return;
+        }
+        // A session left over (a failed try) has to be closed before a new one can start.
+        if (Greetd.state !== GreetdState.Inactive)
+            Greetd.cancelSession();
+        console.info(`kairos-greeter: starting a session for ${user}`);
+        Greetd.createSession(user);
     }
 
     function fail(text: string): void {
@@ -87,7 +97,6 @@ ShellRoot {
         startSession();
     }
 
-    Component.onCompleted: startSession()
 
     FileView {
         path: "/etc/kairos/greeter.json"
@@ -112,6 +121,8 @@ ShellRoot {
             } catch (error) {
                 shell.message = "Invalid /etc/kairos/greeter.json";
             }
+            // The session starts once the settings (with the user name) are read, not before.
+            Qt.callLater(shell.startSession);
         }
         onLoadFailed: {
             if (!shell.preview)
@@ -121,6 +132,7 @@ ShellRoot {
 
     Connections {
         function onAuthMessage(message: string, error: bool, responseRequired: bool, echoResponse: bool): void {
+            console.info(`kairos-greeter: auth message "${message}" (error ${error}, needs answer ${responseRequired})`);
             if (responseRequired) {
                 shell.waitingForPrompt = false;
                 if (shell.submitPending) {
@@ -128,20 +140,24 @@ ShellRoot {
                     shell.busy = false;
                     shell.submit();
                 }
-            } else if (error) {
+            } else if (message) {
+                // PAM notes (an expired password, a locked account, ...) are worth seeing.
                 shell.message = message;
             }
         }
 
         function onAuthFailure(message: string): void {
-            shell.fail("Wrong password");
+            console.warn(`kairos-greeter: auth failure "${message}"`);
+            shell.fail(message && !/authentication failure/i.test(message) ? message : "Wrong password");
         }
 
         function onError(error: string): void {
+            console.warn(`kairos-greeter: greetd error "${error}"`);
             shell.fail(error);
         }
 
         function onReadyToLaunch(): void {
+            console.info("kairos-greeter: signed in, launching " + shell.command.join(" "));
             shell.leaving = true;
         }
 
@@ -154,6 +170,27 @@ ShellRoot {
         interval: shell.aodTimeout * 1000
         running: shell.awake && !shell.buffer && !shell.busy
         onTriggered: shell.awake = false
+    }
+
+    // Never hang on "Signing in…": if greetd doesn't answer, start over with a message.
+    Timer {
+        interval: 12000
+        running: shell.busy && !shell.leaving && !shell.preview
+        onTriggered: {
+            console.warn(`kairos-greeter: no answer from greetd (state ${Greetd.state}, waiting for prompt ${shell.waitingForPrompt})`);
+            shell.fail(shell.waitingForPrompt ? "The login service didn't ask for a password — try again" : "No answer from the login service — try again");
+        }
+    }
+
+    // Same if the session doesn't start after the exit animation.
+    Timer {
+        interval: 15000
+        running: shell.leaving && !shell.preview
+        onTriggered: {
+            console.warn(`kairos-greeter: launch didn't happen (state ${Greetd.state})`);
+            shell.leaving = false;
+            shell.fail("Couldn't start the desktop: " + shell.command.join(" "));
+        }
     }
 
     Timer {
