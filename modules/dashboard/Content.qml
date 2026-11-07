@@ -189,6 +189,7 @@ Item {
                 root.tabIds;
                 return root.paneAt(currentIndex);
             }
+            readonly property bool currentReady: !!(currentItem as Loader)?.item
 
             anchors.fill: parent
 
@@ -196,8 +197,10 @@ Item {
             enabled: !root.customizing
             flickableDirection: Flickable.HorizontalFlick
 
-            implicitWidth: currentItem?.implicitWidth ?? 0
-            implicitHeight: currentItem?.implicitHeight ?? 0
+            // A tab that is still loading keeps the last size, so the dashboard doesn't shrink
+            // to nothing and grow back.
+            implicitWidth: currentReady ? currentItem.implicitWidth : root.lastPaneW
+            implicitHeight: currentReady ? currentItem.implicitHeight : root.lastPaneH
 
             contentX: currentItem?.x ?? 0
             contentWidth: row.width
@@ -271,14 +274,9 @@ Item {
                         // KairosOS: a tab built once stays built (switching back is instant); off
                         // screen it is fully transparent, which the renderer skips.
                         property bool built
-                        // Size from the last time it was built, kept while it loads again.
-                        property real lastW: root.lastPaneW
-                        property real lastH: root.lastPaneH
 
                         x: slot >= 0 ? root.paneX(slot) : 0
                         visible: slot >= 0
-                        implicitWidth: item ? item.implicitWidth : lastW
-                        implicitHeight: item ? item.implicitHeight : lastH
                         sourceComponent: def?.component ?? null
                         // Built in the background, so the tab bar and the slide never wait for it.
                         asynchronous: true
@@ -288,16 +286,12 @@ Item {
 
                         opacity: onScreen ? 1 : 0
                         onImplicitWidthChanged: {
-                            if (item && implicitWidth > 0) {
-                                lastW = implicitWidth;
+                            if (item && implicitWidth > 0)
                                 root.lastPaneW = implicitWidth;
-                            }
                         }
                         onImplicitHeightChanged: {
-                            if (item && implicitHeight > 0) {
-                                lastH = implicitHeight;
+                            if (item && implicitHeight > 0)
                                 root.lastPaneH = implicitHeight;
-                            }
                         }
                         onLoaded: built = true
                         // Light tabs stay; tabs that keep working in the background (media
