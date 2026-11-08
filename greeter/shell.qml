@@ -205,9 +205,12 @@ ShellRoot {
         if (preview)
             Qt.quit();
         else
+            // QV4_GC_TIMELIMIT=0: the QML garbage collector runs in one go instead of in small
+            // steps between frames. Qt 6.12.0's stepwise collector can crash Quickshell
+            // (segfault in collectFromJSStack); a full run costs a few ms now and then.
             // Hyprland's startup output goes to the journal (journalctl -t hyprland) instead
             // of flashing on the screen between the greeter and the desktop.
-            Greetd.launch(["systemd-cat", "-t", "hyprland", "--"].concat(command), ["KAIROS_FROM_GREETER=1"], true);
+            Greetd.launch(["systemd-cat", "-t", "hyprland", "--"].concat(command), ["KAIROS_FROM_GREETER=1", "QV4_GC_TIMELIMIT=0"], true);
     }
 
     // Inside cage (KAIROS_GREETER_KIOSK=1) there is no layer shell: use one plain window,

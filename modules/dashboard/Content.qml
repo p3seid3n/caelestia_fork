@@ -83,10 +83,6 @@ Item {
     // The tab that was on screen, so it stays selected when tabs are added, removed or moved.
     property string currentId
     property bool remapping
-    // Size of the last pane that was built: a tab that is still loading takes it, so the
-    // dashboard doesn't shrink to nothing and grow back while it loads.
-    property real lastPaneW: 600
-    property real lastPaneH: 400
 
     // While customising, the sheet sets the height; the width never shrinks below the current tab's.
     readonly property real nonAnimWidth: (customizing ? Math.max(view.implicitWidth, sheet.implicitWidth) : view.implicitWidth) + viewWrapper.anchors.margins * 2
@@ -189,7 +185,6 @@ Item {
                 root.tabIds;
                 return root.paneAt(currentIndex);
             }
-            readonly property bool currentReady: !!(currentItem as Loader)?.item
 
             anchors.fill: parent
 
@@ -197,10 +192,8 @@ Item {
             enabled: !root.customizing
             flickableDirection: Flickable.HorizontalFlick
 
-            // A tab that is still loading keeps the last size, so the dashboard doesn't shrink
-            // to nothing and grow back.
-            implicitWidth: currentReady ? currentItem.implicitWidth : root.lastPaneW
-            implicitHeight: currentReady ? currentItem.implicitHeight : root.lastPaneH
+            implicitWidth: currentItem?.implicitWidth ?? 0
+            implicitHeight: currentItem?.implicitHeight ?? 0
 
             contentX: currentItem?.x ?? 0
             contentWidth: row.width
@@ -270,7 +263,9 @@ Item {
                         // in by hand. Tabs the slide only passes over (Home -> Performance passes
                         // Media) are not built: that used to build and drop the media tab, with its
                         // audio visualiser, on the way, which stalled the slide and glitched audio.
-                        readonly property bool inView: slot >= 0 && (slot === view.currentIndex || (onScreen && (view.dragging || view.flicking)))
+                        // A tab that is already built stays until it has slid off screen (it used
+                        // to vanish the moment another tab was picked, which made the slide jump).
+                        readonly property bool inView: slot >= 0 && (slot === view.currentIndex || (onScreen && ((built && implicitWidth > 0) || view.dragging || view.flicking)))
                         // KairosOS: a tab built once stays built (switching back is instant); off
                         // screen it is fully transparent, which the renderer skips.
                         property bool built
@@ -278,22 +273,16 @@ Item {
                         x: slot >= 0 ? root.paneX(slot) : 0
                         visible: slot >= 0
                         sourceComponent: def?.component ?? null
-                        // Built in the background, so the tab bar and the slide never wait for it.
-                        asynchronous: true
                         // Nothing is built before the binding below decides (a Loader starts
                         // active, which used to build every tab once at start).
                         active: false
 
                         opacity: onScreen ? 1 : 0
-                        onImplicitWidthChanged: {
-                            if (item && implicitWidth > 0)
-                                root.lastPaneW = implicitWidth;
-                        }
-                        onImplicitHeightChanged: {
-                            if (item && implicitHeight > 0)
-                                root.lastPaneH = implicitHeight;
-                        }
                         onLoaded: built = true
+                        onItemChanged: {
+                            if (!item)
+                                built = false;
+                        }
                         // Light tabs stay; tabs that keep working in the background (media
                         // visualiser, performance graphs) go when the dashboard closes, as before.
                         // A hidden tab is let go.

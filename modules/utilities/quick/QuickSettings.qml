@@ -163,6 +163,48 @@ ColumnLayout {
             y: (1 - root.stage(1)) * 20
         }
 
+        // The open list. It sits above the tiles and grows upwards: the panel hangs from the
+        // bottom of the screen, so the tiles stay under the pointer while it opens and closes
+        // (growing downwards moved them up and away, and the panel closed on collapse).
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: root.expanded !== "" ? list.implicitHeight : 0
+            visible: Layout.preferredHeight > 0.5
+            opacity: root.expanded !== "" ? 1 : 0
+            clip: true
+
+            Behavior on Layout.preferredHeight {
+                Anim {
+                    type: Anim.DefaultSpatial
+                }
+            }
+
+            Behavior on opacity {
+                Anim {
+                    type: Anim.DefaultEffects
+                }
+            }
+
+            StyledRect {
+                id: list
+
+                anchors.bottom: parent.bottom
+                width: parent.width
+                implicitHeight: listLoader.implicitHeight + Tokens.padding.small * 2
+                radius: Tokens.rounding.large
+                color: Colours.tPalette.m3surfaceContainer
+
+                Loader {
+                    id: listLoader
+
+                    x: Tokens.padding.small
+                    y: Tokens.padding.small
+                    width: parent.width - Tokens.padding.small * 2
+                    sourceComponent: root.listShown === "bt" ? btList : root.listShown === "net" ? netList : null
+                }
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             spacing: Tokens.spacing.small
@@ -199,45 +241,6 @@ ColumnLayout {
                 onToggled: {
                     if (root.btAdapter)
                         root.btAdapter.enabled = !root.btAdapter.enabled;
-                }
-            }
-        }
-
-        // The open list
-        Item {
-            Layout.fillWidth: true
-            Layout.preferredHeight: root.expanded !== "" ? list.implicitHeight : 0
-            visible: Layout.preferredHeight > 0.5
-            opacity: root.expanded !== "" ? 1 : 0
-            clip: true
-
-            Behavior on Layout.preferredHeight {
-                Anim {
-                    type: Anim.DefaultSpatial
-                }
-            }
-
-            Behavior on opacity {
-                Anim {
-                    type: Anim.DefaultEffects
-                }
-            }
-
-            StyledRect {
-                id: list
-
-                width: parent.width
-                implicitHeight: listLoader.implicitHeight + Tokens.padding.small * 2
-                radius: Tokens.rounding.large
-                color: Colours.tPalette.m3surfaceContainer
-
-                Loader {
-                    id: listLoader
-
-                    x: Tokens.padding.small
-                    y: Tokens.padding.small
-                    width: parent.width - Tokens.padding.small * 2
-                    sourceComponent: root.listShown === "bt" ? btList : root.listShown === "net" ? netList : null
                 }
             }
         }
@@ -595,7 +598,8 @@ ColumnLayout {
             anchors.right: parent.right
             anchors.rightMargin: Tokens.padding.medium
             anchors.verticalCenter: parent.verticalCenter
-            text: "expand_more"
+            // Points to where the list opens (above).
+            text: "expand_less"
             rotation: tile.open ? 180 : 0
             color: tile.checked ? Colours.palette.m3onPrimaryContainer : Colours.palette.m3onSurfaceVariant
 

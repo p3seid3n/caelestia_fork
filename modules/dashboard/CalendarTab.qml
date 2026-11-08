@@ -109,18 +109,106 @@ CustomMouseArea {
     acceptedButtons: Qt.MiddleButton
     onClicked: goToday()
 
-    ViewLoader {
-        shown: !root.week
-        hiddenScale: 1.05
-        asynchronous: root.week
-        sourceComponent: monthLayout
-    }
+    // One header for both views: the controls stay where they are when switching between month
+    // and week. Left the title, right Today, the arrows, Month/Week, calendars and "+".
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: Tokens.padding.large
+        spacing: Tokens.spacing.normal
 
-    ViewLoader {
-        shown: root.week
-        hiddenScale: 0.95
-        asynchronous: !root.week
-        sourceComponent: weekLayout
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Tokens.spacing.small
+
+            Item {
+                Layout.fillWidth: true
+                implicitHeight: title.implicitHeight
+                clip: true
+
+                StyledText {
+                    id: title
+
+                    width: parent.width
+                    elide: Text.ElideRight
+                    text: {
+                        if (!root.week) {
+                            const m = root.screenState.dashboardDate.toLocaleDateString(Qt.locale(), "MMMM yyyy");
+                            return m.charAt(0).toUpperCase() + m.slice(1);
+                        }
+                        const s = root.weekStart;
+                        const e = new Date(s.getFullYear(), s.getMonth(), s.getDate() + 6);
+                        // "2 – 8 Nov", or "30 Nov – 6 Dec" across two months.
+                        const from = s.getMonth() === e.getMonth() ? s.getDate() : s.toLocaleDateString(Qt.locale(), "d MMM");
+                        return Tr.tr("Week %1").arg(root.isoWeek(s)) + "  ·  " + from + " – " + e.toLocaleDateString(Qt.locale(), "d MMM");
+                    }
+                    font: Tokens.font.body.builders.large.size(22).weight(Font.DemiBold).build()
+                    color: Colours.palette.m3onSurface
+                }
+            }
+
+            TextButton {
+                type: TextButton.Tonal
+                horizontalPadding: Tokens.padding.extraLarge
+                text: Tr.tr("Today")
+                disabled: {
+                    const now = new Date();
+                    if (root.week)
+                        return root.sameDay(root.weekStart, root.weekStartOf(now));
+                    const d = root.screenState.dashboardDate;
+                    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && root.sameDay(root.selected, now);
+                }
+                onClicked: root.goToday()
+            }
+
+            IconButton {
+                type: IconButton.Text
+                isRound: true
+                icon: "chevron_left"
+                onClicked: root.shift(-1)
+            }
+
+            IconButton {
+                type: IconButton.Text
+                isRound: true
+                icon: "chevron_right"
+                onClicked: root.shift(1)
+            }
+
+            ViewSwitch {}
+
+            IconButton {
+                type: IconButton.Text
+                isRound: true
+                icon: "event_list"
+                onClicked: root.openSources()
+            }
+
+            IconButton {
+                type: IconButton.Filled
+                isRound: true
+                icon: "add"
+                onClicked: root.openNew(root.selected, -1, "event", "")
+            }
+        }
+
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+
+            ViewLoader {
+                shown: !root.week
+                hiddenScale: 1.05
+                asynchronous: root.week
+                sourceComponent: monthLayout
+            }
+
+            ViewLoader {
+                shown: root.week
+                hiddenScale: 0.95
+                asynchronous: !root.week
+                sourceComponent: weekLayout
+            }
+        }
     }
 
     Component {
@@ -131,32 +219,24 @@ CustomMouseArea {
 
             CaelestiaMonth {
                 Layout.preferredWidth: 380
-                Layout.alignment: Qt.AlignTop
+                Layout.fillHeight: true
                 screenState: root.screenState
                 selected: root.selected
+                showHeader: false
                 onPicked: day => root.pick(day)
             }
 
-            ColumnLayout {
+            DayAgenda {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 // Long event titles must not push the calendar aside.
                 Layout.preferredWidth: 1
-                spacing: Tokens.spacing.small
-
-                ViewSwitch {
-                    Layout.alignment: Qt.AlignRight
-                }
-
-                DayAgenda {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    day: root.selected
-                    onAddRequested: root.openNew(root.selected, -1, "event", "")
-                    onCalendarsRequested: root.openSources()
-                    onEventPicked: e => root.openEvent(e)
-                    onTaskPicked: t => root.openTask(t)
-                }
+                day: root.selected
+                actions: false
+                onAddRequested: root.openNew(root.selected, -1, "event", "")
+                onCalendarsRequested: root.openSources()
+                onEventPicked: e => root.openEvent(e)
+                onTaskPicked: t => root.openTask(t)
             }
         }
     }
@@ -164,101 +244,15 @@ CustomMouseArea {
     Component {
         id: weekLayout
 
-        Item {
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: Tokens.spacing.small
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Tokens.spacing.small
-
-                    Item {
-                        Layout.fillWidth: true
-                        implicitHeight: title.implicitHeight
-                        clip: true
-
-                        StyledText {
-                            id: title
-
-                            width: parent.width
-                            elide: Text.ElideRight
-                            opacity: weekView.animOpacity
-                            transform: Translate {
-                                x: weekView.animTranslate
-                            }
-                            text: {
-                                const s = weekView.shownWeek;
-                                const e = new Date(s.getFullYear(), s.getMonth(), s.getDate() + 6);
-                                return Tr.tr("Week %1").arg(root.isoWeek(s)) + "  ·  " + s.toLocaleDateString(Qt.locale(), "d MMM") + " – " + e.toLocaleDateString(Qt.locale(), "d MMM");
-                            }
-                            font: Tokens.font.body.builders.large.size(24).weight(Font.DemiBold).build()
-                            color: Colours.palette.m3onSurface
-                        }
-                    }
-
-                    ViewSwitch {}
-
-                    TextButton {
-                        type: TextButton.Tonal
-                        horizontalPadding: Tokens.padding.extraLarge
-                        text: Tr.tr("Today")
-                        disabled: root.sameDay(root.weekStart, root.weekStartOf(new Date()))
-                        onClicked: root.goToday()
-                    }
-
-                    IconButton {
-                        type: IconButton.Text
-                        isRound: true
-                        icon: "chevron_left"
-                        onClicked: root.shift(-1)
-                    }
-
-                    IconButton {
-                        type: IconButton.Text
-                        isRound: true
-                        icon: "chevron_right"
-                        onClicked: root.shift(1)
-                    }
-                }
-
-                WeekView {
-                    id: weekView
-
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    weekStart: root.weekStart
-                    selected: root.selected
-                    onSlotPicked: (day, minutes) => root.openNew(day, minutes, "event", "")
-                    onEventPicked: e => root.openEvent(e)
-                    onTaskPicked: t => root.openTask(t)
-                    onDayPicked: day => {
-                        root.pick(day);
-                        Calendars.view = "month";
-                    }
-                }
-            }
-
-            // Calendars and "+" in the corner, where the itinerary has them in month view.
-            Row {
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                spacing: Tokens.spacing.small
-                z: 5
-
-                IconButton {
-                    type: IconButton.Tonal
-                    isRound: true
-                    icon: "event_list"
-                    onClicked: root.openSources()
-                }
-
-                IconButton {
-                    type: IconButton.Filled
-                    isRound: true
-                    icon: "add"
-                    onClicked: root.openNew(root.selected, -1, "event", "")
-                }
+        WeekView {
+            weekStart: root.weekStart
+            selected: root.selected
+            onSlotPicked: (day, minutes) => root.openNew(day, minutes, "event", "")
+            onEventPicked: e => root.openEvent(e)
+            onTaskPicked: t => root.openTask(t)
+            onDayPicked: day => {
+                root.pick(day);
+                Calendars.view = "month";
             }
         }
     }
@@ -334,7 +328,6 @@ CustomMouseArea {
         required property real hiddenScale
 
         anchors.fill: parent
-        anchors.margins: Tokens.padding.large
         opacity: shown ? 1 : 0
         scale: shown ? 1 : hiddenScale
         visible: opacity > 0

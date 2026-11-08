@@ -34,6 +34,8 @@ ColumnLayout {
         return map;
     }
     property bool showHidden
+    // The calendar tab has its own "calendars" and "+" in its header; widgets keep these.
+    property bool actions: true
     readonly property var lessons: dayEvents.filter(e => e.kind === "lesson")
     readonly property var tasks: Assignments.on(day)
     readonly property var coming: {
@@ -133,6 +135,7 @@ ColumnLayout {
         }
 
         IconButton {
+            visible: root.actions
             type: IconButton.Text
             isRound: true
             icon: "event_list"
@@ -140,6 +143,7 @@ ColumnLayout {
         }
 
         IconButton {
+            visible: root.actions
             type: IconButton.Tonal
             isRound: true
             icon: "add"

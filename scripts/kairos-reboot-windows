@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Restarts the PC into Windows once; the next boot after that is back to the normal order.
+# Uses the firmware's "BootNext" entry, so it works with any Linux bootloader
+# (Limine, systemd-boot, GRUB) as long as Windows has its own UEFI entry.
+# Installed to /usr/local/bin by scripts/install-reboot-windows.sh; needs root.
+set -euo pipefail
+
+[ "$(id -u)" -eq 0 ] || { echo "Needs root" >&2; exit 1; }
+command -v efibootmgr >/dev/null || { echo "efibootmgr is not installed" >&2; exit 1; }
+
+entry=$(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\}[[:space:]]*Windows Boot Manager.*/\1/p' | head -n1)
+[ -n "$entry" ] || { echo "No Windows boot entry found" >&2; exit 2; }
+
+efibootmgr --bootnext "$entry" >/dev/null
+systemctl reboot

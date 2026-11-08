@@ -20,6 +20,8 @@ StyledRect {
 
     required property ScreenState screenState
     property date selected: new Date()
+    // The calendar tab shows month, arrows and "today" in its own header instead.
+    property bool showHeader: true
 
     property date currentDate: screenState.dashboardDate
     readonly property int currMonth: currentDate.getMonth()
@@ -97,6 +99,7 @@ StyledRect {
 
         RowLayout {
             Layout.fillWidth: true
+            visible: root.showHeader
             spacing: Tokens.spacing.extraSmall
 
             IconButton {
@@ -174,6 +177,8 @@ StyledRect {
 
         Item {
             Layout.fillWidth: true
+            // Given more height (the calendar tab), the rows spread out to fill it.
+            Layout.fillHeight: true
             implicitHeight: grid.implicitHeight
 
             opacity: root.animOpacity
@@ -224,6 +229,8 @@ StyledRect {
                     }
 
                     StyledText {
+                        id: dayNum
+
                         anchors.centerIn: parent
                         anchors.verticalCenterOffset: -4
                         horizontalAlignment: Text.AlignHCenter
@@ -238,10 +245,12 @@ StyledRect {
                         font: Tokens.font.body.medium
                     }
 
+                    // Under the number (not the cell's edge), so they stay together when the
+                    // rows are taller.
                     Row {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 2
+                        anchors.top: dayNum.bottom
+                        anchors.topMargin: 5
                         spacing: 2
 
                         Repeater {
@@ -258,10 +267,12 @@ StyledRect {
                         }
                     }
 
+                    // Exam mark: top right of the number.
                     StyledRect {
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        anchors.margins: 2
+                        anchors.bottom: dayNum.top
+                        anchors.left: dayNum.right
+                        anchors.bottomMargin: -4
+                        anchors.leftMargin: 3
                         implicitWidth: 6
                         implicitHeight: 6
                         radius: Tokens.rounding.full
